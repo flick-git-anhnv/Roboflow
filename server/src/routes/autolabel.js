@@ -20,9 +20,60 @@ const INFERENCE_URL = `http://127.0.0.1:${INFERENCE_PORT}`;
 const INFERENCE_BATCH_SIZE = 32;
 const USE_LEGACY_INFER = process.env.USE_LEGACY_INFER === '1';
 
-// In-memory job tracker — Phase 1.2 sẽ migrate sang bảng `jobs` trong DB.
-// Jobs mất khi server restart; người dùng tự chạy lại nếu cần.
+// In-memory tracker cho các job ĐANG CHẠY (fast polling trong quá trình inference).
+// Khi inference xong → state được sync vào DB, entry được xoá khỏi Map.
+// Job đã hoàn thành / sau restart → đọc từ DB (GET handler fall-back bên dưới).
 const jobs = new Map();
+
+// ─── DB helpers cho jobs ──────────────────────────────────────────────────────
+
+/** Tạo row mới trong bảng jobs khi bắt đầu job. */
+function createJobInDB(id, projectId, total, modelId) {
+  db.prepare(`
+    INSERT INTO jobs
+      (id, project_id, status, total_images, model_id, processed,
+       created_annotations, failed, unmatched_classes, updated_at)
+    VALUES (?, ?, 'running', ?, ?, 0, 0, 0, '[]', datetime('now'))
+  `).run(id, projectId, total, modelId);
+}
+
+/** Đồng bộ state in-memory job vào DB (gọi khi job hoàn thành hoặc định kỳ). */
+function syncJobToDB(id, job) {
+  db.prepare(`
+    UPDATE jobs SET
+      status              = ?,
+      processed           = ?,
+      created_annotations = ?,
+      failed              = ?,
+      error_msg           = ?,
+      unmatched_classes   = ?,
+      updated_at          = datetime('now')
+    WHERE id = ?
+  `).run(
+    job.status,
+    job.done,
+    job.created,
+    job.failed,
+    job.error || null,
+    JSON.stringify(job.unmatchedClasses || []),
+    id,
+  );
+}
+
+/** Đọc job từ DB và trả về shape giống in-memory job object. */
+function getJobFromDB(id) {
+  const row = db.prepare('SELECT * FROM jobs WHERE id = ?').get(id);
+  if (!row) return null;
+  return {
+    status: row.status,
+    total: row.total_images,
+    done: row.processed,
+    created: row.created_annotations,
+    failed: row.failed,
+    error: row.error_msg || null,
+    unmatchedClasses: JSON.parse(row.unmatched_classes || '[]'),
+  };
+}
 
 // ─── Helper: chọn ảnh cần inference ─────────────────────────────────────────
 
@@ -266,6 +317,11 @@ router.post('/', async (req, res) => {
     };
     jobs.set(jobId, job);
 
+    // Persist job row vào DB ngay khi bắt đầu.
+    // Nếu server restart trước khi job xong → startup migration trong db.js
+    // sẽ đánh dấu job này là error ('Server restarted while job was in progress').
+    createJobInDB(jobId, projectId, targets.length, model_id);
+
     const modelPath = path.join(MODEL_DIR, projectId, model.filename);
     const conf = Math.min(0.95, Math.max(0.01, parseFloat(confidence) || 0.25));
     const images = targets.map((img) => ({
@@ -274,12 +330,29 @@ router.post('/', async (req, res) => {
     }));
 
     if (USE_LEGACY_INFER) {
+      // Legacy mode: runInference dùng event callbacks (không phải Promise).
+      // Dùng interval 500ms để phát hiện khi job kết thúc và sync lần cuối vào DB.
       runInference(projectId, modelPath, conf, images, job);
+      const legacySyncTimer = setInterval(() => {
+        if (job.status === 'done' || job.status === 'error') {
+          syncJobToDB(jobId, job);
+          jobs.delete(jobId);
+          clearInterval(legacySyncTimer);
+        }
+      }, 500);
     } else {
-      runInferenceHTTP(projectId, modelPath, conf, images, job).catch((err) => {
-        job.status = 'error';
-        job.error = `Lỗi inference: ${err.message}`;
-      });
+      // HTTP mode: hook vào Promise để sync ngay khi inference kết thúc.
+      runInferenceHTTP(projectId, modelPath, conf, images, job)
+        .then(() => {
+          syncJobToDB(jobId, job);
+          jobs.delete(jobId);
+        })
+        .catch((err) => {
+          job.status = 'error';
+          job.error = `Lỗi inference: ${err.message}`;
+          syncJobToDB(jobId, job);
+          jobs.delete(jobId);
+        });
     }
 
     res.status(202).json({ jobId, total: job.total });
@@ -290,9 +363,14 @@ router.post('/', async (req, res) => {
 });
 
 router.get('/:jobId', (req, res) => {
-  const job = jobs.get(req.params.jobId);
-  if (!job) return res.status(404).json({ error: 'Không tìm thấy tác vụ' });
-  res.json(job);
+  // 1. Kiểm tra in-memory Map trước (job đang chạy — phản hồi nhanh nhất)
+  const liveJob = jobs.get(req.params.jobId);
+  if (liveJob) return res.json(liveJob);
+
+  // 2. Fall-back: đọc từ DB (job đã hoàn thành, hoặc sau restart)
+  const dbJob = getJobFromDB(req.params.jobId);
+  if (!dbJob) return res.status(404).json({ error: 'Không tìm thấy tác vụ' });
+  res.json(dbJob);
 });
 
 export default router;

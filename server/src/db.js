@@ -64,10 +64,27 @@ CREATE TABLE IF NOT EXISTS models (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS jobs (
+  id                  TEXT    PRIMARY KEY,
+  project_id          TEXT    NOT NULL,
+  status              TEXT    NOT NULL DEFAULT 'pending',
+  total_images        INTEGER NOT NULL DEFAULT 0,
+  processed           INTEGER NOT NULL DEFAULT 0,
+  created_annotations INTEGER NOT NULL DEFAULT 0,
+  failed              INTEGER NOT NULL DEFAULT 0,
+  model_id            TEXT,
+  error_msg           TEXT,
+  unmatched_classes   TEXT    NOT NULL DEFAULT '[]',
+  created_at          TEXT    NOT NULL DEFAULT (datetime('now')),
+  updated_at          TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_classes_project ON classes(project_id);
 CREATE INDEX IF NOT EXISTS idx_images_project ON images(project_id);
 CREATE INDEX IF NOT EXISTS idx_annotations_image ON annotations(image_id);
 CREATE INDEX IF NOT EXISTS idx_models_project ON models(project_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_project ON jobs(project_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_status  ON jobs(status);
 `);
 
 // Migration for databases created before the 'type'/'points' columns existed
@@ -83,3 +100,13 @@ const classCols = db.prepare("PRAGMA table_info(classes)").all().map((c) => c.na
 if (!classCols.includes('hotkey')) {
   db.exec('ALTER TABLE classes ADD COLUMN hotkey TEXT');
 }
+
+// On every server startup: mark any running/pending jobs as error.
+// Jobs in these states were interrupted by a server restart and can never complete.
+db.prepare(`
+  UPDATE jobs
+  SET status = 'error',
+      error_msg = 'Server restarted while job was in progress',
+      updated_at = datetime('now')
+  WHERE status IN ('running', 'pending')
+`).run();

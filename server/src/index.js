@@ -12,6 +12,7 @@ import exportRouter from './routes/export.js';
 import statsRouter from './routes/stats.js';
 import modelsRouter from './routes/models.js';
 import autolabelRouter from './routes/autolabel.js';
+import jobsRouter from './routes/jobs.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -95,6 +96,7 @@ app.use('/api/projects/:projectId/export', exportRouter);
 app.use('/api/projects/:projectId/stats', statsRouter);
 app.use('/api/projects/:projectId/models', modelsRouter);
 app.use('/api/projects/:projectId/auto-label', autolabelRouter);
+app.use('/api/jobs', jobsRouter);
 
 const clientDist = path.join(__dirname, '..', '..', 'client', 'dist');
 app.use(express.static(clientDist));

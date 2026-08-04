@@ -100,10 +100,13 @@ Roboflow - Copy/
 │   │   │   ├── export.js           ← archiver (yolo/coco/voc)
 │   │   │   ├── stats.js
 │   │   │   ├── models.js
-│   │   │   └── autolabel.js        ← HTTP → FastAPI (STEP-1.1); legacy spawn (USE_LEGACY_INFER=1)
+│   │   │   ├── autolabel.js        ← HTTP → FastAPI (STEP-1.1); DB-backed jobs (STEP-1.2)
+│   │   │   └── jobs.js             ← CRUD /api/jobs (STEP-1.2 MỚI)
 │   │   └── python/
 │   │       ├── inference_service.py  ← FastAPI thường trực, LRU cache 3 model (STEP-1.1 MỚI)
 │   │       └── infer.py              ← stdin→stdout JSON batch inference (GIỮ LẠI, rollback)
+│   ├── migrations/                 ← SQL migration files (chỉ tham khảo; db.js inline là nguồn sự thật)
+│   │   └── 001_create_jobs.sql     ← (STEP-1.2)
 │   ├── data/                       ← RUNTIME (git-ignored)
 │   │   ├── app.db
 │   │   ├── images/<projectId>/
@@ -149,8 +152,9 @@ Roboflow - Copy/
 | Callers/Used-by | (entry point — không ai import) | CONFIRMED |
 | Imports | db.js (UPLOAD_DIR), tất cả 8 route files, node:child_process (spawn) | CONFIRMED |
 | **[STEP-1.1]** Inference lifecycle | `startInferenceService()` → spawn `inference_service.py` sau `app.listen()`. `stopInferenceService()` đăng ký qua `process.on('exit'/'SIGINT'/'SIGTERM')` | CONFIRMED |
+| **[STEP-1.2]** Jobs router | import + mount `routes/jobs.js` tại `/api/jobs` | CONFIRMED |
 | Env vars đọc | `PORT`, `PYTHON_BIN`, `INFERENCE_PORT`, `USE_LEGACY_INFER` | CONFIRMED |
-| Last verified | 2026-08-04 (STEP-1.1) | - |
+| Last verified | 2026-08-04 (STEP-1.2) | - |
 
 **Route mounting:**
 ```
@@ -162,6 +166,7 @@ Roboflow - Copy/
 /api/projects/:projectId/stats        → routes/stats.js
 /api/projects/:projectId/models       → routes/models.js
 /api/projects/:projectId/auto-label   → routes/autolabel.js
+/api/jobs                             → routes/jobs.js    [STEP-1.2 MỚI]
 ```
 
 ---
@@ -172,16 +177,18 @@ Roboflow - Copy/
 |---|---|---|
 | Loại | Singleton DB module (ESM export) | CONFIRMED |
 | Exports | `db` (Database instance), `DATA_DIR`, `UPLOAD_DIR`, `MODEL_DIR` | CONFIRMED |
-| Callers/Used-by | index.js (UPLOAD_DIR), projects.js, classes.js, images.js, annotations.js, export.js, stats.js, models.js, autolabel.js | CONFIRMED |
+| Callers/Used-by | index.js (UPLOAD_DIR), projects.js, classes.js, images.js, annotations.js, export.js, stats.js, models.js, autolabel.js, jobs.js | CONFIRMED |
 | DB engine | better-sqlite3, WAL mode, foreign_keys=ON | CONFIRMED |
 | Schema init | `CREATE TABLE IF NOT EXISTS` — idempotent | CONFIRMED |
 | Migrations inline | `PRAGMA table_info` + `ALTER TABLE` cho cột thiếu | CONFIRMED |
-| Last verified | 2026-08-04 | - |
+| **[STEP-1.2]** Startup cleanup | `UPDATE jobs SET status='error' WHERE status IN ('running','pending')` — mọi job dở dang khi restart đều bị đánh dấu error | CONFIRMED |
+| Last verified | 2026-08-04 (STEP-1.2) | - |
 
 **Inline migrations hiện có (chạy khi server khởi động):**
 1. `annotations.type` — nếu chưa có → ADD COLUMN type TEXT DEFAULT 'bbox'
 2. `annotations.points` — nếu chưa có → ADD COLUMN points TEXT
 3. `classes.hotkey` — nếu chưa có → ADD COLUMN hotkey TEXT
+4. **[STEP-1.2]** Cleanup jobs — UPDATE running/pending → error (startup idempotent)
 
 ---
 
@@ -306,22 +313,42 @@ Roboflow - Copy/
 |---|---|---|
 | Router options | Router({ mergeParams: true }) | CONFIRMED |
 | Imports | db, UPLOAD_DIR, MODEL_DIR, child_process.spawn, readline, node:path, nanoid | CONFIRMED |
-| Job storage | **In-memory Map** (mất khi restart server — STEP-1.2 sẽ migrate sang bảng `jobs` DB) | CONFIRMED |
+| **[STEP-1.2] Job storage** | **DB-backed**: `createJobInDB()` khi POST; `syncJobToDB()` khi hoàn thành; `getJobFromDB()` khi GET fall-back. In-memory Map chỉ dùng trong quá trình inference đang chạy. | CONFIRMED |
 | **[STEP-1.1] Inference mode mặc định** | HTTP fetch → `http://127.0.0.1:{INFERENCE_PORT}/predict` (FastAPI service thường trực) | CONFIRMED |
 | **[STEP-1.1] Rollback mode** | `USE_LEGACY_INFER=1` → dùng spawn infer.py stdin/stdout cũ (giữ nguyên để rollback) | CONFIRMED |
 | Health gate | Trước mỗi job, gọi `GET /health` (timeout 3s); trả 503 nếu service chưa sẵn sàng | CONFIRMED |
 | Batch size | 32 ảnh/request tới FastAPI; timeout 5 phút/batch | CONFIRMED |
 | Env vars đọc | `INFERENCE_PORT` (default 8001), `USE_LEGACY_INFER` | CONFIRMED |
-| Last verified | 2026-08-04 (STEP-1.1) | - |
+| Last verified | 2026-08-04 (STEP-1.2) | - |
 
 | Method | Path | File:Line | Mô tả |
 |---|---|---|---|
-| POST | `/` | autolabel.js:234 | Khởi chạy job inference (returns `{jobId, total}` 202) |
-| GET | `/:jobId` | autolabel.js:292 | Poll trạng thái job |
+| POST | `/` | autolabel.js:~290 | Khởi chạy job inference; tạo row DB ngay; returns `{jobId, total}` 202 |
+| GET | `/:jobId` | autolabel.js:~350 | Poll trạng thái: memory Map → fall-back DB |
 
-**Cơ chế mới (STEP-1.1):** `checkInferenceHealth()` → `fetch(INFERENCE_URL/predict, batch)` → parse response `{classes, results, errors}` → `saveDetectionsForImage()` → cập nhật job Map.
-**Legacy (USE_LEGACY_INFER=1):** `spawn(PYTHON_BIN, [INFER_SCRIPT])` → stdin JSON → readline stdout → cập nhật job Map (giữ nguyên code, không xóa).
+**Cơ chế mới (STEP-1.1):** `checkInferenceHealth()` → `fetch(INFERENCE_URL/predict, batch)` → parse response `{classes, results, errors}` → `saveDetectionsForImage()` → cập nhật job.
+**Cơ chế persist (STEP-1.2):** `createJobInDB()` khi POST; HTTP mode `.then()/.catch()` → `syncJobToDB()` → `jobs.delete()`. Legacy mode: `setInterval(500ms)` poll job.status → sync khi done/error.
+**Legacy (USE_LEGACY_INFER=1):** `spawn(PYTHON_BIN, [INFER_SCRIPT])` → stdin JSON → readline stdout — giữ nguyên, không xóa.
 **Depth-1 callers:** index.js (mount `/api/projects/:pid/auto-label`) — không thay đổi mount path.
+
+---
+
+### 3.11 `server/src/routes/jobs.js` — Job history CRUD (STEP-1.2 MỚI)
+
+| Thuộc tính | Giá trị | Confidence |
+|---|---|---|
+| Router options | Router() | CONFIRMED |
+| Imports | db | CONFIRMED |
+| Callers/Used-by | index.js (mounted /api/jobs) | CONFIRMED |
+| Last verified | 2026-08-04 (STEP-1.2) | - |
+
+| Method | Path | File:Line | Mô tả |
+|---|---|---|---|
+| GET | `/` | jobs.js:~22 | List jobs by projectId (query param `?projectId=`) — ORDER BY created_at DESC |
+| GET | `/:id` | jobs.js:~31 | Get single job by id |
+| DELETE | `/:id` | jobs.js:~37 | Delete job record |
+
+**Response shape (`normalizeJob`):** `{id, projectId, status, total, done, created, failed, modelId, error, unmatchedClasses[], createdAt, updatedAt}`
 
 ---
 
@@ -542,6 +569,26 @@ Các interface chính:
 
 **Index:** `idx_models_project ON models(project_id)`
 
+### Bảng `jobs` — STEP-1.2 MỚI
+
+| Cột | Kiểu | Ràng buộc |
+|---|---|---|
+| id | TEXT | PRIMARY KEY |
+| project_id | TEXT | NOT NULL (no FK — không CASCADE khi xóa project, job history giữ lại) |
+| status | TEXT | NOT NULL DEFAULT 'pending' (pending/running/done/error) |
+| total_images | INTEGER | NOT NULL DEFAULT 0 |
+| processed | INTEGER | NOT NULL DEFAULT 0 (ảnh đã xử lý xong) |
+| created_annotations | INTEGER | NOT NULL DEFAULT 0 |
+| failed | INTEGER | NOT NULL DEFAULT 0 |
+| model_id | TEXT | nullable |
+| error_msg | TEXT | nullable |
+| unmatched_classes | TEXT | NOT NULL DEFAULT '[]' (JSON array tên class không map được) |
+| created_at | TEXT | NOT NULL DEFAULT datetime('now') |
+| updated_at | TEXT | NOT NULL DEFAULT datetime('now') |
+
+**Indexes:** `idx_jobs_project ON jobs(project_id)`, `idx_jobs_status ON jobs(status)`
+**Startup behavior:** Khi server khởi động, mọi row có `status IN ('running','pending')` → cập nhật thành `'error'` với `error_msg='Server restarted while job was in progress'`.
+
 ---
 
 ## 7. API Endpoints
@@ -611,8 +658,16 @@ Query params export: `format=yolo\|coco\|voc`, `splitMode=manual\|auto`, `trainR
 
 | Method | Path | File:Line | Response |
 |---|---|---|---|
-| POST | /api/projects/:pid/auto-label | autolabel.js:73 | {jobId, total} (202) |
-| GET | /api/projects/:pid/auto-label/:jid | autolabel.js:151 | AutoLabelJob |
+| POST | /api/projects/:pid/auto-label | autolabel.js:~290 | {jobId, total} (202) |
+| GET | /api/projects/:pid/auto-label/:jid | autolabel.js:~350 | AutoLabelJob (memory → DB fallback) |
+
+### Jobs (STEP-1.2 MỚI)
+
+| Method | Path | File:Line | Response |
+|---|---|---|---|
+| GET | /api/jobs?projectId=:pid | jobs.js:~22 | JobRecord[] |
+| GET | /api/jobs/:id | jobs.js:~31 | JobRecord |
+| DELETE | /api/jobs/:id | jobs.js:~37 | {ok:true} |
 
 ---
 
@@ -670,12 +725,17 @@ Query params export: `format=yolo\|coco\|voc`, `splitMode=manual\|auto`, `trainR
 
 ---
 
-### Phase 1.2 — Persist bảng `jobs`
+### Phase 1.2 — Persist bảng `jobs` — ✅ HOÀN THÀNH
 
-**Files bị ảnh hưởng:**
-- `server/src/db.js` — thêm `CREATE TABLE IF NOT EXISTS jobs (...)` + migration
-- `server/src/routes/autolabel.js` — thay `const jobs = new Map()` bằng DB reads/writes
-- Tạo mới: `server/src/routes/jobs.js` (nếu cần endpoint riêng cho job history)
+**Files đã thay đổi (STEP-1.2):**
+- `server/src/db.js` — thêm `CREATE TABLE IF NOT EXISTS jobs (...)` + 2 indexes + startup cleanup (UPDATE running/pending → error)
+- `server/src/routes/autolabel.js` — thêm `createJobInDB`, `syncJobToDB`, `getJobFromDB`; POST handler tạo DB row + sync khi hoàn thành; GET handler fall-back DB
+- `server/src/routes/jobs.js` — **MỚI**: GET/GET/:id/DELETE /api/jobs
+- `server/src/index.js` — import + mount jobsRouter tại `/api/jobs`
+- `server/migrations/001_create_jobs.sql` — **MỚI**: migration SQL (tham khảo)
+
+**Depth-1 callers:** client/src/api.ts (`getAutoLabelJob`) — REST interface giữ nguyên, không cần sửa client.
+**Watch out:** `jobs` table không có FK tới `projects` — khi xóa project, jobs không bị cascade. Thiết kế có chủ ý (giữ job history). Phase sau nếu cần cleanup → DELETE FROM jobs WHERE project_id=? trong routes/projects.js khi DELETE project.
 
 ---
 
@@ -743,3 +803,4 @@ Query params export: `format=yolo\|coco\|voc`, `splitMode=manual\|auto`, `trainR
 |---|---|---|---|
 | 2026-08-04 | senior-developer (STEP-0.1) | Tạo mới — full audit 5 bảng, 8 routes, API endpoints, blast radius map | (STEP-0.1) |
 | 2026-08-04 | senior-developer (STEP-1.1) | Cập nhật §3.10 autolabel.js (HTTP mode + legacy rollback), thêm §5.2 inference_service.py, cập nhật §8 Python deps, §9 Phase 1.1 DONE | (STEP-1.1) |
+| 2026-08-04 | senior-developer (STEP-1.2) | Thêm §3.11 jobs.js (MỚI), cập nhật §2 (migrations/ + jobs.js), §3.1 (route /api/jobs), §3.2 (startup cleanup), §3.10 (DB-backed job storage), §6 (jobs table schema), §7 (/api/jobs endpoints), §9 Phase 1.2 DONE | (STEP-1.2) |

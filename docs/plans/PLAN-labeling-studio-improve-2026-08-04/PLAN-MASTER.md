@@ -42,7 +42,7 @@ Stack hiện tại: `server/src/` (Express, better-sqlite3, raw SQL), `client/sr
 
 | # | Bước | Agent | Status | Step file | Hoàn thành lúc |
 |---|------|-------|--------|-----------|-----------------|
-| 0.1 | Codebase audit + tạo CODE-GRAPH | senior-developer | ⬜ | `steps/STEP-0.1-codebase-audit-code-graph.md` | - |
+| 0.1 | Codebase audit + tạo CODE-GRAPH | senior-developer | ✅ | `steps/STEP-0.1-codebase-audit-code-graph.md` | 2026-08-04 11:38 |
 | 0.2 | Technical Design Document tổng thể + ADR (schema migration, auth design, inference service) | tech-lead → cto | ⬜ | `steps/STEP-0.2-technical-design-architecture.md` | - |
 
 ---
@@ -162,6 +162,7 @@ Không có hiện tại.
 | 2026-08-04 | Plan tạo mới — 22 bước, 6 phase (v1) | task-planner |
 | 2026-08-04 | v2: Auth từ Phase 5 → Phase 2; xoá SAM; tái đánh số phases; 22→21 bước | task-planner |
 | 2026-08-04 | v3: Thêm step 3.5 (image done status) + step 5.5 (class switcher); 21→23 bước | task-planner |
+| 2026-08-04 | Bước 0.1 ✅ Done — CODE-GRAPH tạo xong, commit 7118fe1 | senior-developer |
 
 ---
 **Status icons:** ⬜ Todo | 🔄 In Progress | ✅ Done | 🛑 Blocked | ⏭️ Skipped

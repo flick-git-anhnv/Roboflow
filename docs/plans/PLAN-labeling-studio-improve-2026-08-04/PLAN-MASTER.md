@@ -1,7 +1,7 @@
 ---
 task: labeling-studio-improve
 created: 2026-08-04
-updated: 2026-08-04 17:04
+updated: 2026-08-04 20:06
 status: active
 workflow: WF-FEATURE (đa phase)
 priority: P1
@@ -65,7 +65,7 @@ Stack hiện tại: `server/src/` (Express, better-sqlite3, raw SQL), `client/sr
 
 | # | Bước | Agent | Status | Step file | Hoàn thành lúc |
 |---|------|-------|--------|-----------|-----------------|
-| 2.1 | Auth design + ADR + security-audit-stride ⚠️ CTO/EM approve bắt buộc trước 2.2 | tech-lead → cto | ⬜ | `steps/STEP-2.1-auth-design-security-audit.md` | - |
+| 2.1 | Auth design + ADR + security-audit-stride ⚠️ CTO/EM approve bắt buộc trước 2.2 | tech-lead → cto | ✅ | `steps/STEP-2.1-auth-design-security-audit.md` | 2026-08-04 20:06 |
 | 2.2 | Auth implementation (JWT/session, bảng `users`, middleware) ⚠️ security-audit-stride trước merge | senior-developer | ⬜ | `steps/STEP-2.2-auth-implementation.md` | - |
 | 2.3 | Review workflow: role annotator vs reviewer, trạng thái ảnh (draft/in-review/approved) ⚠️ security-audit-stride trước merge | senior-developer | ⬜ | `steps/STEP-2.3-review-workflow.md` | - |
 
@@ -167,6 +167,7 @@ Không có hiện tại.
 | 2026-08-04 16:42 | Bước 1.1 ✅ Done — inference_service.py + autolabel HTTP refactor + Node lifecycle. Commit 9f943a1. Tested: /health, /predict 404, /warmup 404, Node spawn/kill lifecycle OK. | senior-developer |
 | 2026-08-04 16:53 | Bước 1.2 ✅ Done — bảng jobs SQLite (12 cột, 2 indexes, startup cleanup), routes/jobs.js CRUD, autolabel DB-backed job tracking. Commit c6aebaf. Tested: schema verify, restart→error, /api/jobs endpoints. | senior-developer |
 | 2026-08-04 17:04 | Bước 1.3 ✅ Done — thumbnail service lazy on-demand (sharp, cache server/data/thumbnails/), API list images trả thumbnail_url, client grid dùng thumbnail. Commit 8214474. Tested: 800×600 PNG (104KB) → thumb 3.1KB, cache, custom size, 404 image không tồn tại. **Phase 1 HOÀN THÀNH.** | junior-developer |
+| 2026-08-04 20:06 | Bước 2.1 ✅ Done — ADR-auth-labeling-studio.md (10 mục, 8 AD-A). Chốt JWT HS256 24h, bcrypt cost=12, middleware GLOBAL cả GET, role matrix chi tiết ~20 endpoint, seed admin trong migration, rate-limit 10/15p `POST /api/auth/login`, CORS siết theo env, secret env bắt buộc prod. Security-audit-stride: 0 Fail HIGH, 5 warning MED đã fold vào AD. CTO APPROVED kèm 2 điều kiện #A1 #A2 cho bước 2.2. EM APPROVED. DOCX xuất OK (PDF lỗi RPC docx2pdf, ⚠️ đã biết). | tech-lead + cto + em |
 
 ---
 **Status icons:** ⬜ Todo | 🔄 In Progress | ✅ Done | 🛑 Blocked | ⏭️ Skipped

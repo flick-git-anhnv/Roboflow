@@ -3,7 +3,7 @@
 > Tài liệu bản đồ codebase. Mọi coding agent PHẢI đọc file này TRƯỚC khi mở source.
 > Cập nhật ngay sau mỗi PR merge có thay đổi cấu trúc/API/schema.
 >
-> Last verified: 2026-08-04 | Người tạo: senior-developer (STEP-0.1)
+> Last verified: 2026-08-04 | Cập nhật: senior-developer (STEP-1.1)
 
 ---
 
@@ -43,16 +43,33 @@
 │  ├─ routes/stats.js        Thống kê project                  │
 │  ├─ routes/models.js       Upload/CRUD model .pt             │
 │  └─ routes/autolabel.js    Khởi chạy / poll job auto-label   │
+│                             (HTTP → FastAPI; legacy: spawn)   │
 │                                                              │
 │  db.js  — better-sqlite3, WAL, foreign_keys ON              │
 │           server/data/app.db  (5 bảng)                       │
-└───────────────────┬──────────────────────────────────────────┘
-                    │ child_process.spawn (stdin/stdout JSON)
-┌───────────────────▼──────────────────────────────────────────┐
-│  Python — server/src/python/infer.py                         │
-│  Load model YOLO → batch predict → stream kết quả JSON       │
-│  Phụ thuộc: ultralytics                                      │
-└──────────────────────────────────────────────────────────────┘
+│                                                              │
+│  [STEP-1.1] index.js spawn inference_service.py khi start,  │
+│  kill khi SIGINT/SIGTERM/exit                                │
+└──────────┬────────────────────────┬─────────────────────────┘
+           │ SQL                    │ HTTP 127.0.0.1:8001
+           │                ┌───────▼──────────────────────────┐
+           │                │  Python FastAPI (STEP-1.1 MỚI)   │
+           │                │  server/src/python/              │
+           │                │  inference_service.py            │
+           │                │  ├─ GET  /health                 │
+           │                │  ├─ POST /warmup                 │
+           │                │  └─ POST /predict                │
+           │                │  LRU cache: tối đa 3 model/RAM   │
+           │                └──────────────────────────────────┘
+           │                        (USE_LEGACY_INFER=1 → dùng)
+           │                ┌───────▼──────────────────────────┐
+           │                │  Python legacy — infer.py         │
+           │                │  stdin/stdout JSON, spawn/req     │
+           │                │  GIỮ NGUYÊN để rollback           │
+           │                └──────────────────────────────────┘
+┌──────────▼──────────────────────────────────────────────────┐
+│  SQLite  server/data/app.db  (5 bảng)                       │
+└─────────────────────────────────────────────────────────────┘
 
 File tĩnh:  server/data/images/<projectId>/<nanoid>.<ext>
             server/data/models/<projectId>/<nanoid>.pt
@@ -60,8 +77,10 @@ Served qua: GET /uploads/* (express.static) + client SPA dist
 ```
 
 **Port:** 4000 (server + serve SPA dist + /uploads)
+**Inference port:** 8001 (env `INFERENCE_PORT`, mặc định 8001)
 **DB file:** `server/data/app.db` (tạo tự động nếu chưa có)
 **Python bin:** env `PYTHON_BIN` hoặc `python` (mặc định)
+**Rollback:** env `USE_LEGACY_INFER=1` → dùng `infer.py` spawn-per-request
 
 ---
 
@@ -81,9 +100,10 @@ Roboflow - Copy/
 │   │   │   ├── export.js           ← archiver (yolo/coco/voc)
 │   │   │   ├── stats.js
 │   │   │   ├── models.js
-│   │   │   └── autolabel.js        ← spawn Python, in-memory jobs Map
+│   │   │   └── autolabel.js        ← HTTP → FastAPI (STEP-1.1); legacy spawn (USE_LEGACY_INFER=1)
 │   │   └── python/
-│   │       └── infer.py            ← stdin→stdout JSON batch inference
+│   │       ├── inference_service.py  ← FastAPI thường trực, LRU cache 3 model (STEP-1.1 MỚI)
+│   │       └── infer.py              ← stdin→stdout JSON batch inference (GIỮ LẠI, rollback)
 │   ├── data/                       ← RUNTIME (git-ignored)
 │   │   ├── app.db
 │   │   ├── images/<projectId>/
@@ -127,8 +147,10 @@ Roboflow - Copy/
 | Middleware | cors(), express.json(limit 10mb), express.static(/uploads) | CONFIRMED |
 | SPA fallback | serve `client/dist/index.html` cho mọi non-API route | CONFIRMED |
 | Callers/Used-by | (entry point — không ai import) | CONFIRMED |
-| Imports | db.js (UPLOAD_DIR), tất cả 8 route files | CONFIRMED |
-| Last verified | 2026-08-04 | - |
+| Imports | db.js (UPLOAD_DIR), tất cả 8 route files, node:child_process (spawn) | CONFIRMED |
+| **[STEP-1.1]** Inference lifecycle | `startInferenceService()` → spawn `inference_service.py` sau `app.listen()`. `stopInferenceService()` đăng ký qua `process.on('exit'/'SIGINT'/'SIGTERM')` | CONFIRMED |
+| Env vars đọc | `PORT`, `PYTHON_BIN`, `INFERENCE_PORT`, `USE_LEGACY_INFER` | CONFIRMED |
+| Last verified | 2026-08-04 (STEP-1.1) | - |
 
 **Route mounting:**
 ```
@@ -283,18 +305,23 @@ Roboflow - Copy/
 | Thuộc tính | Giá trị | Confidence |
 |---|---|---|
 | Router options | Router({ mergeParams: true }) | CONFIRMED |
-| Imports | db, UPLOAD_DIR, MODEL_DIR, child_process.spawn, readline, nanoid | CONFIRMED |
-| Job storage | **In-memory Map** (mất khi restart server) | CONFIRMED |
-| Python protocol | stdin JSON → stdout streaming JSON (1 line/ảnh) | CONFIRMED |
-| Last verified | 2026-08-04 | - |
+| Imports | db, UPLOAD_DIR, MODEL_DIR, child_process.spawn, readline, node:path, nanoid | CONFIRMED |
+| Job storage | **In-memory Map** (mất khi restart server — STEP-1.2 sẽ migrate sang bảng `jobs` DB) | CONFIRMED |
+| **[STEP-1.1] Inference mode mặc định** | HTTP fetch → `http://127.0.0.1:{INFERENCE_PORT}/predict` (FastAPI service thường trực) | CONFIRMED |
+| **[STEP-1.1] Rollback mode** | `USE_LEGACY_INFER=1` → dùng spawn infer.py stdin/stdout cũ (giữ nguyên để rollback) | CONFIRMED |
+| Health gate | Trước mỗi job, gọi `GET /health` (timeout 3s); trả 503 nếu service chưa sẵn sàng | CONFIRMED |
+| Batch size | 32 ảnh/request tới FastAPI; timeout 5 phút/batch | CONFIRMED |
+| Env vars đọc | `INFERENCE_PORT` (default 8001), `USE_LEGACY_INFER` | CONFIRMED |
+| Last verified | 2026-08-04 (STEP-1.1) | - |
 
 | Method | Path | File:Line | Mô tả |
 |---|---|---|---|
-| POST | `/` | autolabel.js:73 | Khởi chạy job inference (returns jobId) |
-| GET | `/:jobId` | autolabel.js:151 | Poll trạng thái job |
+| POST | `/` | autolabel.js:234 | Khởi chạy job inference (returns `{jobId, total}` 202) |
+| GET | `/:jobId` | autolabel.js:292 | Poll trạng thái job |
 
-**Cơ chế:** `spawn(PYTHON_BIN, [INFER_SCRIPT])` → ghi toàn bộ job payload qua stdin → đọc stdout từng dòng qua readline → cập nhật job object trong Map.
-**Điểm yếu:** jobs mất khi server restart; model YOLO load lại từ disk mỗi lần gọi (không cache trong RAM).
+**Cơ chế mới (STEP-1.1):** `checkInferenceHealth()` → `fetch(INFERENCE_URL/predict, batch)` → parse response `{classes, results, errors}` → `saveDetectionsForImage()` → cập nhật job Map.
+**Legacy (USE_LEGACY_INFER=1):** `spawn(PYTHON_BIN, [INFER_SCRIPT])` → stdin JSON → readline stdout → cập nhật job Map (giữ nguyên code, không xóa).
+**Depth-1 callers:** index.js (mount `/api/projects/:pid/auto-label`) — không thay đổi mount path.
 
 ---
 
@@ -383,17 +410,18 @@ Các interface chính:
 
 ## 5. Module map — Python Inference
 
-### `server/src/python/infer.py`
+### 5.1 `server/src/python/infer.py` — Legacy (GIỮ LẠI để rollback)
 
 | Thuộc tính | Giá trị | Confidence |
 |---|---|---|
 | Protocol | stdin: JSON payload → stdout: streaming NDJSON (1 line/ảnh) + `{"done":true}` | CONFIRMED |
-| Caller | autolabel.js (via child_process.spawn) | CONFIRMED |
+| Caller | autolabel.js `runInference()` (khi `USE_LEGACY_INFER=1`) | CONFIRMED |
 | Dependencies | ultralytics (import lazy bên trong main()) | CONFIRMED |
 | Model load | `YOLO(model_path)` — load từ disk mỗi lần spawn | CONFIRMED |
 | Output bbox | `{class_index, type:"bbox", x, y, w, h}` (pixel coords) | CONFIRMED |
 | Output quad | `{class_index, type:"quad", points:[{x,y}×4]}` (OBB) | CONFIRMED |
 | Error handling | Per-image try/except → `{image_id, error, classes}` | CONFIRMED |
+| Status | GIỮ NGUYÊN — rollback bằng `USE_LEGACY_INFER=1` | CONFIRMED |
 | Last verified | 2026-08-04 | - |
 
 **Input format (stdin):**
@@ -404,6 +432,42 @@ Các interface chính:
   "images": [{"id": "nanoid", "path": "/abs/path/img.jpg"}, ...]
 }
 ```
+
+---
+
+### 5.2 `server/src/python/inference_service.py` — FastAPI thường trực (STEP-1.1 MỚI)
+
+| Thuộc tính | Giá trị | Confidence |
+|---|---|---|
+| Framework | FastAPI + uvicorn | CONFIRMED |
+| Port | `127.0.0.1:{INFERENCE_PORT}` (default 8001) | CONFIRMED |
+| LRU cache | `LRUModelCache(max_size=3)` — tối đa 3 model giữ trong RAM | CONFIRMED |
+| Caller | index.js `startInferenceService()` — spawn khi Node start | CONFIRMED |
+| Dependencies | fastapi, uvicorn, ultralytics (lazy import bên trong `_load_model`) | CONFIRMED |
+| Lifecycle | index.js spawn/kill; không auto-restart khi crash (STEP log `Service stopped`) | CONFIRMED |
+| Env vars | `INFERENCE_PORT` | CONFIRMED |
+| Last verified | 2026-08-04 (STEP-1.1) | - |
+
+**Endpoints:**
+
+| Method | Path | Mô tả |
+|---|---|---|
+| GET | `/health` | Trả `{status, loaded_models[], uptime_s}` |
+| POST | `/warmup` | Preload model vào LRU cache. Body: `{model_path}` |
+| POST | `/predict` | Batch inference. Body: `{model_path, conf, iou, images:[{id,path}]}` |
+
+**Response `/predict`:**
+```json
+{
+  "classes": ["class_name_0", ...],
+  "results": [{"image_id": "nanoid", "detections": [{"class_index":0,"type":"bbox","x":...,"y":...,"w":...,"h":...}]}],
+  "errors": [{"image_id": "nanoid", "error": "message"}]
+}
+```
+
+**Output bbox:** `{class_index, type:"bbox", x, y, w, h}` — tương thích với infer.py cũ
+**Output quad (OBB):** `{class_index, type:"quad", points:[{x,y}×4]}`
+**Error handling:** Per-image try/except → gộp vào `errors[]` (không crash toàn batch)
 
 ---
 
@@ -577,11 +641,13 @@ Query params export: `format=yolo\|coco\|voc`, `splitMode=manual\|auto`, `trainR
 | vite | ^5.4.6 | dev/build tool |
 | typescript | ^5.6.2 | type checking |
 
-### Python dependencies (INFERRED từ import trong infer.py)
+### Python dependencies
 
-| Package | Dùng ở |
-|---|---|
-| ultralytics | infer.py (YOLO model, predict) |
+| Package | Dùng ở | Confidence |
+|---|---|---|
+| ultralytics | infer.py, inference_service.py (YOLO model, predict — lazy import) | CONFIRMED |
+| fastapi | inference_service.py (FastAPI app, endpoints, Pydantic schemas) | CONFIRMED |
+| uvicorn | inference_service.py (ASGI server, entrypoint) | CONFIRMED |
 
 ---
 
@@ -590,11 +656,14 @@ Query params export: `format=yolo\|coco\|voc`, `splitMode=manual\|auto`, `trainR
 > Mục này là "blast radius map" cho 23 bước trong PLAN-MASTER.md.
 > Confidence: CONFIRMED từ phân tích source + plan.
 
-### Phase 1.1 — Inference service FastAPI (thường trực)
+### Phase 1.1 — Inference service FastAPI (thường trực) — ✅ HOÀN THÀNH
 
-**Files bị ảnh hưởng:**
-- `server/src/routes/autolabel.js` — MAJOR REWRITE: thay `spawn(PYTHON_BIN, [...])` bằng `fetch('http://localhost:8001/predict')`. Xóa bỏ readline/stdin/stdout protocol.
-- `server/src/python/infer.py` — GIỮ NGUYÊN (backup/rollback). Tạo thêm `server/src/python/inference_service.py` (FastAPI app mới).
+**Files đã thay đổi (STEP-1.1):**
+- `server/src/routes/autolabel.js` — Refactor: thêm `runInferenceHTTP()` gọi FastAPI, giữ `runInference()` cũ cho rollback (USE_LEGACY_INFER=1). Health gate trước mỗi job → 503 khi service down.
+- `server/src/index.js` — Thêm `startInferenceService()` / `stopInferenceService()` lifecycle.
+- `server/src/python/inference_service.py` — FastAPI app mới, LRU cache 3 model.
+- `server/src/python/infer.py` — GIỮ NGUYÊN (rollback).
+- `server/README.md` — Thêm mục "Chạy inference service", env vars, cấu trúc Python inference.
 
 **Depth-1 callers:** index.js (mount autolabelRouter) — không đổi mount path.
 **Watch out:** client/api.ts `startAutoLabel` + `getAutoLabelJob` không đổi (same REST interface).
@@ -672,4 +741,5 @@ Query params export: `format=yolo\|coco\|voc`, `splitMode=manual\|auto`, `trainR
 
 | Ngày | Người cập nhật | Nội dung | Commit |
 |---|---|---|---|
-| 2026-08-04 | senior-developer (STEP-0.1) | Tạo mới — full audit 5 bảng, 8 routes, API endpoints, blast radius map | TBD |
+| 2026-08-04 | senior-developer (STEP-0.1) | Tạo mới — full audit 5 bảng, 8 routes, API endpoints, blast radius map | (STEP-0.1) |
+| 2026-08-04 | senior-developer (STEP-1.1) | Cập nhật §3.10 autolabel.js (HTTP mode + legacy rollback), thêm §5.2 inference_service.py, cập nhật §8 Python deps, §9 Phase 1.1 DONE | (STEP-1.1) |

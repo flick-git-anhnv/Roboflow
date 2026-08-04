@@ -12,9 +12,19 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PYTHON_BIN = process.env.PYTHON_BIN || 'python';
 const INFER_SCRIPT = path.join(__dirname, '..', 'python', 'infer.py');
 
-// In-memory job tracker. Jobs don't need to survive a server restart — an
-// auto-label run that gets interrupted can simply be re-started by the user.
+// ─── Inference service config ─────────────────────────────────────────────────
+// USE_LEGACY_INFER=1  → dùng spawn infer.py cũ (rollback)
+// Mặc định           → gọi HTTP tới FastAPI service tại INFERENCE_PORT
+const INFERENCE_PORT = process.env.INFERENCE_PORT || '8001';
+const INFERENCE_URL = `http://127.0.0.1:${INFERENCE_PORT}`;
+const INFERENCE_BATCH_SIZE = 32;
+const USE_LEGACY_INFER = process.env.USE_LEGACY_INFER === '1';
+
+// In-memory job tracker — Phase 1.2 sẽ migrate sang bảng `jobs` trong DB.
+// Jobs mất khi server restart; người dùng tự chạy lại nếu cần.
 const jobs = new Map();
+
+// ─── Helper: chọn ảnh cần inference ─────────────────────────────────────────
 
 function pickTargetImages(projectId, scope, overwrite) {
   const all = db.prepare('SELECT * FROM images WHERE project_id = ?').all(projectId);
@@ -23,11 +33,8 @@ function pickTargetImages(projectId, scope, overwrite) {
   return all.filter((i) => i.status !== 'labeled');
 }
 
-// Maps model class indices to EXISTING project classes by name only — never
-// creates new classes and never relies on index/id matching, since a model's
-// class order has no relation to the project's. Model classes with no
-// same-name match in the project are left unmapped (their detections are
-// dropped) and reported back so the user knows which ones were skipped.
+// ─── Helper: map tên class model → class_id trong project ────────────────────
+
 function buildClassMapping(projectId, modelClassNames, cache) {
   if (cache.map) return cache.map;
   const existing = db.prepare('SELECT * FROM classes WHERE project_id = ?').all(projectId);
@@ -38,6 +45,8 @@ function buildClassMapping(projectId, modelClassNames, cache) {
   cache.unmatched = modelClassNames.filter((name, i) => !map[i]);
   return map;
 }
+
+// ─── Helper: lưu detections của 1 ảnh vào DB ─────────────────────────────────
 
 function saveDetectionsForImage(imageId, boxes, classIdMap) {
   const rows = boxes.map((b) => {
@@ -63,40 +72,112 @@ function saveDetectionsForImage(imageId, boxes, classIdMap) {
     for (const r of rows) {
       insert.run(nanoid(), imageId, r.class_id, r.x, r.y, r.w, r.h, r.type, r.points);
     }
-    db.prepare("UPDATE images SET status = ? WHERE id = ?").run(rows.length > 0 ? 'labeled' : 'unlabeled', imageId);
+    db.prepare('UPDATE images SET status = ? WHERE id = ?').run(
+      rows.length > 0 ? 'labeled' : 'unlabeled', imageId,
+    );
   });
   tx();
 
   return rows.length;
 }
 
-router.post('/', (req, res) => {
-  const { projectId } = req.params;
-  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId);
-  if (!project) return res.status(404).json({ error: 'Không tìm thấy project' });
+// ─── Health check: kiểm tra FastAPI service sẵn sàng chưa ────────────────────
 
-  const { model_id, confidence, scope, overwrite } = req.body;
-  const model = db.prepare('SELECT * FROM models WHERE id = ? AND project_id = ?').get(model_id, projectId);
-  if (!model) return res.status(400).json({ error: 'Không tìm thấy model đã chọn' });
+/**
+ * Gọi GET /health trên inference service.
+ * Trả về true nếu service up, false nếu timeout hoặc lỗi mạng.
+ */
+async function checkInferenceHealth() {
+  try {
+    const controller = new AbortController();
+    const tid = setTimeout(() => controller.abort(), 3000);
+    try {
+      const res = await fetch(`${INFERENCE_URL}/health`, { signal: controller.signal });
+      return res.ok;
+    } finally {
+      clearTimeout(tid);
+    }
+  } catch {
+    return false;
+  }
+}
 
-  const targets = pickTargetImages(projectId, scope === 'unlabeled' ? 'unlabeled' : 'all', !!overwrite);
-  if (!targets.length) {
-    return res.status(400).json({ error: 'Không có ảnh nào phù hợp để gán nhãn tự động (kiểm tra lại phạm vi/ghi đè)' });
+// ─── Mode MỚI: HTTP → FastAPI service ────────────────────────────────────────
+
+/**
+ * Chạy inference qua HTTP tới FastAPI service thường trực.
+ * Chia job thành batch INFERENCE_BATCH_SIZE=32 ảnh, cập nhật job.done sau mỗi batch.
+ * Cập nhật job object in-place; không trả về giá trị.
+ */
+async function runInferenceHTTP(projectId, modelPath, conf, images, job) {
+  const classCache = {};
+
+  for (let i = 0; i < images.length; i += INFERENCE_BATCH_SIZE) {
+    const batch = images.slice(i, i + INFERENCE_BATCH_SIZE);
+    const batchNum = Math.floor(i / INFERENCE_BATCH_SIZE) + 1;
+
+    try {
+      const controller = new AbortController();
+      // Timeout 5 phút/batch — đủ cho batch lớn trên CPU chậm
+      const tid = setTimeout(() => controller.abort(), 5 * 60 * 1000);
+
+      let response;
+      try {
+        response = await fetch(`${INFERENCE_URL}/predict`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model_path: modelPath, conf, images: batch }),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(tid);
+      }
+
+      if (!response.ok) {
+        const errText = await response.text().catch(() => '');
+        console.error(`[autolabel] Batch ${batchNum} HTTP ${response.status}: ${errText}`);
+        job.failed += batch.length;
+        job.done += batch.length;
+        continue;
+      }
+
+      const data = await response.json();
+      const { classes = [], results = [], errors = [] } = data;
+
+      // buildClassMapping cache kết quả sau lần gọi đầu tiên (same model, same classes)
+      const classIdMap = buildClassMapping(projectId, classes, classCache);
+      if (classCache.unmatched?.length && job.unmatchedClasses.length === 0) {
+        job.unmatchedClasses = classCache.unmatched;
+      }
+
+      for (const result of results) {
+        job.created += saveDetectionsForImage(result.image_id, result.detections, classIdMap);
+        job.done += 1;
+      }
+
+      for (const err of errors) {
+        console.error(`[autolabel] Image ${err.image_id} inference error: ${err.error}`);
+        job.failed += 1;
+        job.done += 1;
+      }
+
+    } catch (err) {
+      const reason = err.name === 'AbortError' ? 'timeout (5 min)' : err.message;
+      console.error(`[autolabel] Batch ${batchNum} failed: ${reason}`);
+      job.failed += batch.length;
+      job.done += batch.length;
+    }
   }
 
-  const jobId = nanoid();
-  const job = { status: 'running', total: targets.length, done: 0, created: 0, failed: 0, error: null, unmatchedClasses: [] };
-  jobs.set(jobId, job);
+  job.status = 'done';
+}
 
-  const modelPath = path.join(MODEL_DIR, projectId, model.filename);
-  const conf = Math.min(0.95, Math.max(0.01, parseFloat(confidence) || 0.25));
-  const images = targets.map((img) => ({ id: img.id, path: path.join(UPLOAD_DIR, projectId, img.filename) }));
+// ─── Mode CŨ (LEGACY): spawn infer.py mỗi lần (USE_LEGACY_INFER=1) ───────────
 
-  runInference(projectId, modelPath, conf, images, job);
-
-  res.status(202).json({ jobId, total: job.total });
-});
-
+/**
+ * Giữ nguyên để rollback — KHÔNG XÓA.
+ * Kích hoạt bằng env USE_LEGACY_INFER=1.
+ */
 function runInference(projectId, modelPath, conf, images, job) {
   const child = spawn(PYTHON_BIN, [INFER_SCRIPT], { stdio: ['pipe', 'pipe', 'pipe'] });
   const classCache = {};
@@ -147,6 +228,66 @@ function runInference(projectId, modelPath, conf, images, job) {
   child.stdin.write(JSON.stringify({ model_path: modelPath, conf, images }));
   child.stdin.end();
 }
+
+// ─── Routes ───────────────────────────────────────────────────────────────────
+
+router.post('/', async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId);
+    if (!project) return res.status(404).json({ error: 'Không tìm thấy project' });
+
+    const { model_id, confidence, scope, overwrite } = req.body;
+    const model = db.prepare('SELECT * FROM models WHERE id = ? AND project_id = ?').get(model_id, projectId);
+    if (!model) return res.status(400).json({ error: 'Không tìm thấy model đã chọn' });
+
+    const targets = pickTargetImages(projectId, scope === 'unlabeled' ? 'unlabeled' : 'all', !!overwrite);
+    if (!targets.length) {
+      return res.status(400).json({
+        error: 'Không có ảnh nào phù hợp để gán nhãn tự động (kiểm tra lại phạm vi/ghi đè)',
+      });
+    }
+
+    // Kiểm tra inference service — chỉ khi không dùng legacy mode
+    if (!USE_LEGACY_INFER) {
+      const healthy = await checkInferenceHealth();
+      if (!healthy) {
+        return res.status(503).json({
+          error: 'INFERENCE_UNAVAILABLE',
+          message: 'Inference service chưa sẵn sàng. Vui lòng chờ vài giây rồi thử lại, hoặc khởi động lại server.',
+        });
+      }
+    }
+
+    const jobId = nanoid();
+    const job = {
+      status: 'running', total: targets.length, done: 0,
+      created: 0, failed: 0, error: null, unmatchedClasses: [],
+    };
+    jobs.set(jobId, job);
+
+    const modelPath = path.join(MODEL_DIR, projectId, model.filename);
+    const conf = Math.min(0.95, Math.max(0.01, parseFloat(confidence) || 0.25));
+    const images = targets.map((img) => ({
+      id: img.id,
+      path: path.join(UPLOAD_DIR, projectId, img.filename),
+    }));
+
+    if (USE_LEGACY_INFER) {
+      runInference(projectId, modelPath, conf, images, job);
+    } else {
+      runInferenceHTTP(projectId, modelPath, conf, images, job).catch((err) => {
+        job.status = 'error';
+        job.error = `Lỗi inference: ${err.message}`;
+      });
+    }
+
+    res.status(202).json({ jobId, total: job.total });
+  } catch (err) {
+    console.error('[autolabel] Unexpected error in POST /:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 router.get('/:jobId', (req, res) => {
   const job = jobs.get(req.params.jobId);

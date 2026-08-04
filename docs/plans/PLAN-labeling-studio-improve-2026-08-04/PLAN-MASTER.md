@@ -1,7 +1,7 @@
 ---
 task: labeling-studio-improve
 created: 2026-08-04
-updated: 2026-08-04 16:53
+updated: 2026-08-04 17:04
 status: active
 workflow: WF-FEATURE (đa phase)
 priority: P1
@@ -55,7 +55,7 @@ Stack hiện tại: `server/src/` (Express, better-sqlite3, raw SQL), `client/sr
 |---|------|-------|--------|-----------|-----------------|
 | 1.1 | Inference service Python thường trực (FastAPI, giữ model trong RAM, Node gọi HTTP) | senior-developer | ✅ | `steps/STEP-1.1-inference-service-fastapi.md` | 2026-08-04 16:42 |
 | 1.2 | Persist bảng `jobs` cho auto-label (thay in-memory) | senior-developer | ✅ | `steps/STEP-1.2-jobs-table-persist.md` | 2026-08-04 16:53 |
-| 1.3 | Thumbnail service (resize ảnh lớn, lưu cache, phục vụ grid/filmstrip) | junior-developer | ⬜ | `steps/STEP-1.3-thumbnail-service.md` | - |
+| 1.3 | Thumbnail service (resize ảnh lớn, lưu cache, phục vụ grid/filmstrip) | junior-developer | ✅ | `steps/STEP-1.3-thumbnail-service.md` | 2026-08-04 17:04 |
 
 ---
 
@@ -166,6 +166,7 @@ Không có hiện tại.
 | 2026-08-04 | Bước 0.2 ✅ Done — TDD + ADR (10 AD) tạo xong, CTO APPROVED (điều kiện #1: verify row count trước/sau migration 3.1) | tech-lead + cto |
 | 2026-08-04 16:42 | Bước 1.1 ✅ Done — inference_service.py + autolabel HTTP refactor + Node lifecycle. Commit 9f943a1. Tested: /health, /predict 404, /warmup 404, Node spawn/kill lifecycle OK. | senior-developer |
 | 2026-08-04 16:53 | Bước 1.2 ✅ Done — bảng jobs SQLite (12 cột, 2 indexes, startup cleanup), routes/jobs.js CRUD, autolabel DB-backed job tracking. Commit c6aebaf. Tested: schema verify, restart→error, /api/jobs endpoints. | senior-developer |
+| 2026-08-04 17:04 | Bước 1.3 ✅ Done — thumbnail service lazy on-demand (sharp, cache server/data/thumbnails/), API list images trả thumbnail_url, client grid dùng thumbnail. Commit 8214474. Tested: 800×600 PNG (104KB) → thumb 3.1KB, cache, custom size, 404 image không tồn tại. **Phase 1 HOÀN THÀNH.** | junior-developer |
 
 ---
 **Status icons:** ⬜ Todo | 🔄 In Progress | ✅ Done | 🛑 Blocked | ⏭️ Skipped

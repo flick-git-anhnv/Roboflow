@@ -31,6 +31,7 @@ export interface ImageItem {
   status: ImageStatus;
   created_at: string;
   class_ids: string[];
+  thumbnail_url?: string;
 }
 
 export type AnnotationType = 'bbox' | 'quad';

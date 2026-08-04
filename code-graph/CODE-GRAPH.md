@@ -3,7 +3,7 @@
 > Tài liệu bản đồ codebase. Mọi coding agent PHẢI đọc file này TRƯỚC khi mở source.
 > Cập nhật ngay sau mỗi PR merge có thay đổi cấu trúc/API/schema.
 >
-> Last verified: 2026-08-04 | Cập nhật: senior-developer (STEP-1.1)
+> Last verified: 2026-08-04 | Cập nhật: junior-developer (STEP-1.3)
 
 ---
 
@@ -73,7 +73,9 @@
 
 File tĩnh:  server/data/images/<projectId>/<nanoid>.<ext>
             server/data/models/<projectId>/<nanoid>.pt
+            server/data/thumbnails/{imageId}_{size}.jpg  ← STEP-1.3 MỚI
 Served qua: GET /uploads/* (express.static) + client SPA dist
+            GET /api/images/:id/thumb  ← thumbnail service (on-demand, lazy cache)
 ```
 
 **Port:** 4000 (server + serve SPA dist + /uploads)
@@ -95,7 +97,8 @@ Roboflow - Copy/
 │   │   ├── routes/
 │   │   │   ├── projects.js
 │   │   │   ├── classes.js
-│   │   │   ├── images.js           ← multer, sharp, adm-zip
+│   │   │   ├── images.js           ← multer, sharp, adm-zip; GET / trả thêm thumbnail_url
+│   │   │   ├── thumbnails.js       ← thumbnail cache service (STEP-1.3 MỚI)
 │   │   │   ├── annotations.js
 │   │   │   ├── export.js           ← archiver (yolo/coco/voc)
 │   │   │   ├── stats.js
@@ -110,6 +113,7 @@ Roboflow - Copy/
 │   ├── data/                       ← RUNTIME (git-ignored)
 │   │   ├── app.db
 │   │   ├── images/<projectId>/
+│   │   ├── thumbnails/             ← cache thumbnail (STEP-1.3 MỚI): {imageId}_{size}.jpg
 │   │   └── models/<projectId>/
 │   └── package.json
 ├── client/
@@ -153,8 +157,9 @@ Roboflow - Copy/
 | Imports | db.js (UPLOAD_DIR), tất cả 8 route files, node:child_process (spawn) | CONFIRMED |
 | **[STEP-1.1]** Inference lifecycle | `startInferenceService()` → spawn `inference_service.py` sau `app.listen()`. `stopInferenceService()` đăng ký qua `process.on('exit'/'SIGINT'/'SIGTERM')` | CONFIRMED |
 | **[STEP-1.2]** Jobs router | import + mount `routes/jobs.js` tại `/api/jobs` | CONFIRMED |
+| **[STEP-1.3]** Thumbnails router | import + mount `routes/thumbnails.js` tại `/api/images` | CONFIRMED |
 | Env vars đọc | `PORT`, `PYTHON_BIN`, `INFERENCE_PORT`, `USE_LEGACY_INFER` | CONFIRMED |
-| Last verified | 2026-08-04 (STEP-1.2) | - |
+| Last verified | 2026-08-04 (STEP-1.3) | - |
 
 **Route mounting:**
 ```
@@ -166,7 +171,8 @@ Roboflow - Copy/
 /api/projects/:projectId/stats        → routes/stats.js
 /api/projects/:projectId/models       → routes/models.js
 /api/projects/:projectId/auto-label   → routes/autolabel.js
-/api/jobs                             → routes/jobs.js    [STEP-1.2 MỚI]
+/api/jobs                             → routes/jobs.js        [STEP-1.2 MỚI]
+/api/images                           → routes/thumbnails.js  [STEP-1.3 MỚI]
 ```
 
 ---
@@ -244,7 +250,7 @@ Roboflow - Copy/
 
 | Method | Path | File:Line | Mô tả |
 |---|---|---|---|
-| GET | `/` | images.js:51 | List images (kèm class_ids array) |
+| GET | `/` | images.js:51 | List images (kèm class_ids array + **thumbnail_url** — STEP-1.3) |
 | GET | `/:imageId` | images.js:64 | Get single image + annotations |
 | POST | `/upload` | images.js:73 | Upload nhiều file ảnh (multer.array) |
 | POST | `/upload-zip` | images.js:95 | Upload ZIP chứa ảnh |
@@ -333,6 +339,29 @@ Roboflow - Copy/
 
 ---
 
+### 3.12 `server/src/routes/thumbnails.js` — Thumbnail cache service (STEP-1.3 MỚI)
+
+| Thuộc tính | Giá trị | Confidence |
+|---|---|---|
+| Router options | Router() (không mergeParams) | CONFIRMED |
+| Imports | db, UPLOAD_DIR, DATA_DIR, path, fs, sharp | CONFIRMED |
+| Callers/Used-by | index.js (mounted /api/images) | CONFIRMED |
+| Cache dir | `DATA_DIR/thumbnails/` — tạo sẵn khi module load | CONFIRMED |
+| Naming cache file | `{imageId}_{size}.jpg` | CONFIRMED |
+| Size range | min 32, max 600, default 300 | CONFIRMED |
+| Fallback | resize lỗi → serve ảnh gốc (không trả 500) | CONFIRMED |
+| Last verified | 2026-08-04 (STEP-1.3) | - |
+
+| Method | Path | Mô tả |
+|---|---|---|
+| GET | `/:id/thumb` | Lazy thumbnail: cache hit → serve; ảnh gốc nhỏ hơn size → serve gốc; else resize+cache+serve |
+
+**Query params:** `?size=300` (default 300, min 32, max 600)
+**Cache-Control:** `public, max-age=86400` (1 ngày)
+**Exports:** `THUMB_DIR` (dùng để test/cleanup)
+
+---
+
 ### 3.11 `server/src/routes/jobs.js` — Job history CRUD (STEP-1.2 MỚI)
 
 | Thuộc tính | Giá trị | Confidence |
@@ -392,7 +421,7 @@ startAutoLabel, getAutoLabelJob
 Các interface chính:
 - `Project` — id, name, description, created_at, image_count, labeled_count, class_count
 - `ClassLabel` — id, project_id, name, color, sort_order, hotkey
-- `ImageItem` — id, project_id, filename, original_name, width, height, split, status, created_at, class_ids[]
+- `ImageItem` — id, project_id, filename, original_name, width, height, split, status, created_at, class_ids[], **thumbnail_url?** (STEP-1.3)
 - `Annotation` — id, image_id, class_id, x, y, w, h, type, points
 - `ImageWithAnnotations` — ImageItem + annotations[]
 - `ModelInfo` — id, project_id, filename, original_name, created_at
@@ -669,6 +698,15 @@ Query params export: `format=yolo\|coco\|voc`, `splitMode=manual\|auto`, `trainR
 | GET | /api/jobs/:id | jobs.js:~31 | JobRecord |
 | DELETE | /api/jobs/:id | jobs.js:~37 | {ok:true} |
 
+### Thumbnails (STEP-1.3 MỚI)
+
+| Method | Path | File:Line | Response |
+|---|---|---|---|
+| GET | /api/images/:id/thumb | thumbnails.js:29 | JPEG binary (thumbnail or original) — 200; 404 nếu image/file không tồn tại |
+
+**Query params:** `?size=300` (default 300px, min 32, max 600)
+**Cache-Control:** `public, max-age=86400`
+
 ---
 
 ## 8. Dependency graph
@@ -739,6 +777,23 @@ Query params export: `format=yolo\|coco\|voc`, `splitMode=manual\|auto`, `trainR
 
 ---
 
+### Phase 1.3 — Thumbnail service — ✅ HOÀN THÀNH
+
+**Files đã thay đổi (STEP-1.3):**
+- `server/src/routes/thumbnails.js` — **MỚI**: lazy thumbnail endpoint `GET /api/images/:id/thumb`, cache `DATA_DIR/thumbnails/{id}_{size}.jpg`
+- `server/src/index.js` — import + mount thumbnailsRouter tại `/api/images`
+- `server/src/routes/images.js` — GET `/` thêm field `thumbnail_url` vào response
+- `client/src/types.ts` — thêm `thumbnail_url?: string` vào `ImageItem`
+- `client/src/pages/ProjectDetailPage.tsx` — image grid dùng `img.thumbnail_url` thay `/uploads/…`
+
+**Depth-1 callers:**
+- `client/src/pages/ProjectDetailPage.tsx` → dùng `img.thumbnail_url` (thêm)
+- `client/src/pages/AnnotatorPage.tsx` → không thay đổi (dùng `getImage` riêng, không qua list)
+
+**Watch out:** `THUMB_DIR` tạo khi module load — nếu `DATA_DIR` không ghi được sẽ crash lúc server start. Cần đảm bảo `server/data/` có write permission.
+
+---
+
 ### Phase 2.2 — Auth implementation
 
 **Files bị ảnh hưởng:**
@@ -804,3 +859,4 @@ Query params export: `format=yolo\|coco\|voc`, `splitMode=manual\|auto`, `trainR
 | 2026-08-04 | senior-developer (STEP-0.1) | Tạo mới — full audit 5 bảng, 8 routes, API endpoints, blast radius map | (STEP-0.1) |
 | 2026-08-04 | senior-developer (STEP-1.1) | Cập nhật §3.10 autolabel.js (HTTP mode + legacy rollback), thêm §5.2 inference_service.py, cập nhật §8 Python deps, §9 Phase 1.1 DONE | (STEP-1.1) |
 | 2026-08-04 | senior-developer (STEP-1.2) | Thêm §3.11 jobs.js (MỚI), cập nhật §2 (migrations/ + jobs.js), §3.1 (route /api/jobs), §3.2 (startup cleanup), §3.10 (DB-backed job storage), §6 (jobs table schema), §7 (/api/jobs endpoints), §9 Phase 1.2 DONE | (STEP-1.2) |
+| 2026-08-04 | junior-developer (STEP-1.3) | Thêm §3.12 thumbnails.js (MỚI), cập nhật §1 (data/thumbnails/), §2 (thư mục + route), §3.1 (mount /api/images), §3.5 (thumbnail_url field), §4.3 (ImageItem.thumbnail_url), §7 (/api/images/:id/thumb), §9 Phase 1.3 DONE | (STEP-1.3) |

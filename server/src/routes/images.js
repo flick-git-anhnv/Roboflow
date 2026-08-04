@@ -58,6 +58,7 @@ router.get('/', (req, res) => {
     ...i,
     class_ids_raw: undefined,
     class_ids: i.class_ids_raw ? i.class_ids_raw.split(',') : [],
+    thumbnail_url: `/api/images/${i.id}/thumb`,
   })));
 });
 

@@ -277,7 +277,7 @@ export default function ProjectDetailPage() {
               {pagedImages.map((img) => (
                 <Link key={img.id} to={`/projects/${project.id}/annotate/${img.id}`}
                   className={`image-tile ${img.status === 'labeled' ? 'labeled' : ''}`}>
-                  <img src={`/uploads/${project.id}/${img.filename}`} alt={img.original_name} loading="lazy" />
+                  <img src={img.thumbnail_url || `/uploads/${project.id}/${img.filename}`} alt={img.original_name} loading="lazy" />
                   <span className={`badge ${img.status === 'labeled' ? 'labeled' : ''}`}>
                     {img.status === 'labeled' ? 'Đã gán' : 'Chưa gán'}
                   </span>

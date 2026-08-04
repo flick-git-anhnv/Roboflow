@@ -63,8 +63,8 @@ Viết TDD tổng thể + ADR chốt 5 điểm kiến trúc mấu chốt cho 22 
 
 ## Commit
 
-- Hash: (điền sau khi commit)
-- Đã push: (điền sau khi push)
+- Hash: edc2335
+- Đã push: có (origin/Improve)
 
 ---
 **Status icons:** ⬜ Todo | 🔄 In Progress | ✅ Done | 🛑 Blocked | ⏭️ Skipped

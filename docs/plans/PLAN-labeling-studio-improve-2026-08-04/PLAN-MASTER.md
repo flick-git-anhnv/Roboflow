@@ -1,7 +1,7 @@
 ---
 task: labeling-studio-improve
 created: 2026-08-04
-updated: 2026-08-04
+updated: 2026-08-04 16:42
 status: active
 workflow: WF-FEATURE (đa phase)
 priority: P1
@@ -53,7 +53,7 @@ Stack hiện tại: `server/src/` (Express, better-sqlite3, raw SQL), `client/sr
 
 | # | Bước | Agent | Status | Step file | Hoàn thành lúc |
 |---|------|-------|--------|-----------|-----------------|
-| 1.1 | Inference service Python thường trực (FastAPI, giữ model trong RAM, Node gọi HTTP) | senior-developer | ⬜ | `steps/STEP-1.1-inference-service-fastapi.md` | - |
+| 1.1 | Inference service Python thường trực (FastAPI, giữ model trong RAM, Node gọi HTTP) | senior-developer | ✅ | `steps/STEP-1.1-inference-service-fastapi.md` | 2026-08-04 16:42 |
 | 1.2 | Persist bảng `jobs` cho auto-label (thay in-memory) | senior-developer | ⬜ | `steps/STEP-1.2-jobs-table-persist.md` | - |
 | 1.3 | Thumbnail service (resize ảnh lớn, lưu cache, phục vụ grid/filmstrip) | junior-developer | ⬜ | `steps/STEP-1.3-thumbnail-service.md` | - |
 
@@ -164,6 +164,7 @@ Không có hiện tại.
 | 2026-08-04 | v3: Thêm step 3.5 (image done status) + step 5.5 (class switcher); 21→23 bước | task-planner |
 | 2026-08-04 | Bước 0.1 ✅ Done — CODE-GRAPH tạo xong, commit 7118fe1 | senior-developer |
 | 2026-08-04 | Bước 0.2 ✅ Done — TDD + ADR (10 AD) tạo xong, CTO APPROVED (điều kiện #1: verify row count trước/sau migration 3.1) | tech-lead + cto |
+| 2026-08-04 16:42 | Bước 1.1 ✅ Done — inference_service.py + autolabel HTTP refactor + Node lifecycle. Commit 9f943a1. Tested: /health, /predict 404, /warmup 404, Node spawn/kill lifecycle OK. | senior-developer |
 
 ---
 **Status icons:** ⬜ Todo | 🔄 In Progress | ✅ Done | 🛑 Blocked | ⏭️ Skipped

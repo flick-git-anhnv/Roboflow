@@ -1,0 +1,12 @@
+node_modules/
+dist/
+*.log
+temp/
+server/data/*
+!server/data/.gitkeep
+.env
+.DS_Store
+Thumbs.db
+__pycache__/
+*.pyc
+*.tsbuildinfo

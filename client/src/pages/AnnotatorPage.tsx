@@ -749,24 +749,33 @@ export default function AnnotatorPage() {
         const rest = prev.filter((b) => b.id !== DRAWING_ID);
         return [...rest, { id: DRAWING_ID, class_id: activeClassId, type: 'bbox', x: x0, y: y0, w, h }];
       });
-    } else if (drag.mode === 'move' && drag.orig && selectedId) {
+    } else if (drag.mode === 'move' && drag.orig) {
+      // BUGFIX: dùng drag.orig.id (ref, luôn đúng) thay vì `selectedId` (state) —
+      // `selectedId` có thể còn là giá trị CŨ tại thời điểm này vì handleDragMove
+      // được đóng closure lúc attachWindowDragListeners() chạy trong onMouseDown,
+      // TRƯỚC KHI setSelectedId(hit.id) kịp re-render. Khi user bấm-kéo 1 box
+      // CHƯA được chọn từ trước, dùng `selectedId` cũ sẽ khiến box ĐANG được chọn
+      // trước đó bị di chuyển nhầm thay vì box vừa bấm.
+      const targetId = drag.orig.id;
       const dx = x - drag.startX, dy = y - drag.startY;
       const orig = drag.orig;
       if (orig.type === 'quad' && orig.points) {
         const w = image?.width || 0, h = image?.height || 0;
         const newPoints = orig.points.map((p) => ({ x: clamp(p.x + dx, 0, w), y: clamp(p.y + dy, 0, h) })) as [Point, Point, Point, Point];
-        setBoxes((prev) => prev.map((b) => (b.id === selectedId ? { ...b, points: newPoints, ...boundingRect(newPoints) } : b)));
+        setBoxes((prev) => prev.map((b) => (b.id === targetId ? { ...b, points: newPoints, ...boundingRect(newPoints) } : b)));
       } else {
-        setBoxes((prev) => prev.map((b) => (b.id === selectedId
+        setBoxes((prev) => prev.map((b) => (b.id === targetId
           ? { ...b, x: clamp(orig.x + dx, 0, (image?.width || 0) - b.w), y: clamp(orig.y + dy, 0, (image?.height || 0) - b.h) }
           : b)));
       }
-    } else if (drag.mode === 'resize' && drag.orig && selectedId) {
+    } else if (drag.mode === 'resize' && drag.orig) {
+      // BUGFIX: tương tự move — dùng drag.orig.id thay vì `selectedId` (xem giải thích trên).
+      const targetId = drag.orig.id;
       const orig = drag.orig;
       if (typeof drag.handle === 'number' && orig.points) {
         const newPoints = orig.points.map((p) => ({ ...p })) as [Point, Point, Point, Point];
         newPoints[drag.handle] = { x, y };
-        setBoxes((prev) => prev.map((b) => (b.id === selectedId ? { ...b, points: newPoints, ...boundingRect(newPoints) } : b)));
+        setBoxes((prev) => prev.map((b) => (b.id === targetId ? { ...b, points: newPoints, ...boundingRect(newPoints) } : b)));
       } else {
         let nx = orig.x, ny = orig.y, nw = orig.w, nh = orig.h;
         if (drag.handle === 'se') { nw = x - orig.x; nh = y - orig.y; }
@@ -775,7 +784,7 @@ export default function AnnotatorPage() {
         if (drag.handle === 'nw') { nw = orig.x + orig.w - x; nh = orig.y + orig.h - y; nx = x; ny = y; }
         if (nw < 0) { nx += nw; nw = -nw; }
         if (nh < 0) { ny += nh; nh = -nh; }
-        setBoxes((prev) => prev.map((b) => (b.id === selectedId ? { ...b, x: nx, y: ny, w: nw, h: nh } : b)));
+        setBoxes((prev) => prev.map((b) => (b.id === targetId ? { ...b, x: nx, y: ny, w: nw, h: nh } : b)));
       }
     }
   };

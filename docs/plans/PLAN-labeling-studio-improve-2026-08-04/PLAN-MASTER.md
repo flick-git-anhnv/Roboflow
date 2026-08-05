@@ -1,7 +1,7 @@
 ---
 task: labeling-studio-improve
 created: 2026-08-04
-updated: 2026-08-05 11:32
+updated: 2026-08-05 11:42
 status: active
 workflow: WF-FEATURE (đa phase)
 priority: P1
@@ -106,7 +106,7 @@ Stack hiện tại: `server/src/` (Express, better-sqlite3, raw SQL), `client/sr
 | 5.2 | Copy nhãn từ ảnh trước sang ảnh hiện tại (phím tắt, hữu ích cho chuỗi ảnh camera tĩnh) | junior-developer | ✅ | `steps/STEP-5.2-copy-labels.md` | 2026-08-05 11:13 |
 | 5.3 | Batch operations: gán class hàng loạt, đổi split, xoá nhiều ảnh | junior-developer | ✅ | `steps/STEP-5.3-batch-operations.md` | 2026-08-05 11:25 |
 | 5.4 | Filmstrip/grid xem nhanh nhiều ảnh (thumbnail async theo batch) | senior-developer | ✅ | `steps/STEP-5.4-filmstrip-grid.md` | 2026-08-05 11:32 |
-| 5.5 | Quick class switcher: MRU phím 1-9, fuzzy search Ctrl+K, hotkey 2 ký tự, hiển thị bảng hotkey | senior-developer | ⬜ | `steps/STEP-5.5-class-switcher.md` | - |
+| 5.5 | Quick class switcher: MRU phím 1-9, fuzzy search Ctrl+K, hotkey 2 ký tự, hiển thị bảng hotkey | senior-developer | ✅ | `steps/STEP-5.5-class-switcher.md` | 2026-08-05 11:42 |
 
 ---
 
@@ -175,6 +175,8 @@ Không có hiện tại.
 | 2026-08-05 03:20 | Bước 3.5 ✅ Done — m006 migration (completed_at/completed_by), POST/DELETE mark-done, submit-review gate IMAGE_NOT_COMPLETED, UI nút Xong + phím D, filter + badge ProjectDetailPage. Row 19 (15 case). 128 passed, 0 failed, tsc 0 lỗi. Commit ac61d98. **Phase 3 HOÀN TOÀN HOÀN THÀNH.** | senior-developer |
 | 2026-08-05 10:33 | Bước 4.1 ✅ Done — bảng `detect_cache` (m007, image_id+model_id UNIQUE), cache RAW detections tại CACHE_RAW_CONF=0.01 + filter conf ở tầng app (đổi threshold không cần detect lại), `inference_service.py` trả thêm `conf`, `DELETE /cache` endpoint. Row 20 (5 case). 133 passed, 0 failed. | senior-developer |
 | 2026-08-05 10:51 | Bước 4.2 ✅ Done — m008 `projects.default_model_id`, routes/prefill.js (GET prefill + PATCH default-model), AnnotatorPage auto-call prefill (setBoxes, không scheduleSave, banner UI), ProjectDetailPage UI chọn model mặc định (reviewer/admin), Row 21 (13 case). 146 passed, 0 failed. tsc 0 lỗi. Commit 3475fdd. **Phase 4 HOÀN THÀNH.** | senior-developer |
+| 2026-08-05 11:32 | Bước 5.1–5.4 ✅ Done — undo/redo, copy labels from prev, batch operations, filmstrip. Commits bba89b3..a72b38c. 162 passed. | senior-developer |
+| 2026-08-05 11:42 | Bước 5.5 ✅ Done — MRU 1-9, Ctrl+K fuzzy switcher, hotkey 2-char buffer. normalizeHotkey→2-char, fuzzyMatch(), switcher modal, sidebar MRU display. Commit 0adcf60. 162 passed, tsc 0 lỗi. **Phase 5 HOÀN THÀNH.** | senior-developer |
 
 ---
 **Status icons:** ⬜ Todo | 🔄 In Progress | ✅ Done | 🛑 Blocked | ⏭️ Skipped

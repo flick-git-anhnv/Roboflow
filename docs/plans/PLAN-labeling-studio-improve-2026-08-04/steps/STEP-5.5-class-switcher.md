@@ -2,8 +2,8 @@
 step: "5.5"
 plan: ../PLAN-MASTER.md
 agent: senior-developer
-status: todo
-completed_at:
+status: done
+completed_at: 2026-08-05 11:42
 deps: ["0.2"]
 ---
 
@@ -31,26 +31,47 @@ Thiết kế lại cơ chế đổi class nhanh trong AnnotatorPage để scale 
 
 ## Đã làm
 
-[Điền SAU khi hoàn thành]
+1. **server/src/routes/classes.js**: `normalizeHotkey` đổi `slice(0,1)` → `slice(0,2)` — DB column đã là TEXT (không giới hạn độ dài), không cần migration.
+
+2. **client/src/pages/AnnotatorPage.tsx**:
+   - Thêm state `mruClassIds` (init từ `localStorage.getItem('mru_classes_{projectId}')`, default `[]`).
+   - Thêm `hotkeyBufferRef` + `hotkeyTimerRef` cho cơ chế buffer 2-char.
+   - Thêm `showSwitcher`, `switcherQuery`, `switcherIdx`, `switcherInputRef` cho Ctrl+K modal.
+   - `pushToMru(classId)`: đẩy lên đầu MRU, persist localStorage, giới hạn 9 phần tử.
+   - `assignClassToSelected` gọi `pushToMru` sau khi setActiveClassId.
+   - `switcherResults` useMemo: filter classes theo `fuzzyMatch(switcherQuery, c.name)`.
+   - `applySwitcherClass` + `handleSwitcherKey` (↑↓ navigate, Enter chọn, Esc đóng).
+   - Key handler update: Ctrl+K toggle switcher (trước HTMLInputElement check); phím 1-9 → MRU lookup; ký tự chữ → buffer 2-char (immediate nếu không nhập nhằng, 500ms timer nếu có 2-char hotkey bắt đầu bằng ký tự đó).
+   - Sidebar class list: hiển thị MRU key (1-9) + custom hotkey song song, dùng flex.
+   - Quick switcher modal JSX: overlay + input auto-focus + list với highlight + MRU key + custom hotkey.
+   - Xóa `effectiveHotkey` (không còn dùng), thêm `fuzzyMatch` (substring + sequential char).
+
+3. **client/src/styles.css**: Thêm `.class-switcher-overlay`, `.class-switcher-modal`, `.class-switcher-input`, `.class-switcher-list`, `.class-switcher-row` (brand colors KZTEK).
 
 ## Artifact
 
-[Điền SAU khi hoàn thành]
+- `server/src/routes/classes.js` — normalizeHotkey 2-char
+- `client/src/pages/AnnotatorPage.tsx` — MRU + Ctrl+K + buffer hotkey + sidebar update + switcher modal
+- `client/src/styles.css` — switcher CSS
 
 ## Quyết định quan trọng
 
-[Điền SAU khi hoàn thành]
+1. **MRU per-project**: localStorage key `mru_classes_{projectId}` — tránh trộn MRU giữa các project khác nhau.
+2. **1-9 keys hoàn toàn là MRU**: bỏ mapping cũ (index trong `classes` array). User cần gán class ít nhất 1 lần để xuất hiện trong MRU và được phím số.
+3. **Buffer không delay 1-char khi không nhập nhằng**: nếu không có hotkey 2-char nào bắt đầu bằng ký tự đó → áp dụng ngay, không chờ 500ms.
+4. **Ctrl+K toggle**: bấm lần 2 đóng switcher (không cần chỉ Esc).
+5. **DB không cần migration**: SQLite TEXT không giới hạn độ dài — chỉ cần sửa validation tầng route.
 
 ## Handoff Payload — bước sau đọc phần này
 
-- do_not_redo: Không có
-- watch_out: Không có
-- next_inputs: Không có
+- do_not_redo: Phase 5 HOÀN THÀNH. Không thêm MRU/switcher/hotkey-buffer vào AnnotatorPage (đã có). Không thêm `.class-switcher-*` CSS (đã có). Không sửa normalizeHotkey trong classes.js (đã là 2-char). `effectiveHotkey` function đã bị xóa — không tham chiếu lại.
+- watch_out: Phím 1-9 giờ là MRU lookup — nếu MRU rỗng (chưa dùng class nào), phím 1-9 không làm gì. User cần click/gán class ít nhất 1 lần để phím số hoạt động. Phím chữ có 500ms delay nếu có 2-char hotkey nhập nhằng — bình thường theo thiết kế. `assignClassToSelected` phụ thuộc `pushToMru` trong deps array.
+- next_inputs: Commit hash `0adcf60`. Phase 6 (nếu có) không đụng đến AnnotatorPage nhiều. File `client/src/pages/AnnotatorPage.tsx` + `client/src/styles.css` tại commit này là trạng thái cuối Phase 5.
 
 ## Commit
 
-- Hash: [điền sau khi commit]
-- Đã push: [có/không]
+- Hash: 0adcf60
+- Đã push: có — branch `Improve`
 
 ---
 **Status icons:** ⬜ Todo | 🔄 In Progress | ✅ Done | 🛑 Blocked | ⏭️ Skipped

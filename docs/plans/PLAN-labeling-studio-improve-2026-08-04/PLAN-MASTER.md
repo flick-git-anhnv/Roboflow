@@ -1,7 +1,7 @@
 ---
 task: labeling-studio-improve
 created: 2026-08-04
-updated: 2026-08-04 20:06
+updated: 2026-08-05 08:18
 status: active
 workflow: WF-FEATURE (đa phase)
 priority: P1
@@ -66,7 +66,7 @@ Stack hiện tại: `server/src/` (Express, better-sqlite3, raw SQL), `client/sr
 | # | Bước | Agent | Status | Step file | Hoàn thành lúc |
 |---|------|-------|--------|-----------|-----------------|
 | 2.1 | Auth design + ADR + security-audit-stride ⚠️ CTO/EM approve bắt buộc trước 2.2 | tech-lead → cto | ✅ | `steps/STEP-2.1-auth-design-security-audit.md` | 2026-08-04 20:06 |
-| 2.2 | Auth implementation (JWT/session, bảng `users`, middleware) ⚠️ security-audit-stride trước merge | senior-developer | ⬜ | `steps/STEP-2.2-auth-implementation.md` | - |
+| 2.2 | Auth implementation (JWT/session, bảng `users`, middleware) ⚠️ security-audit-stride trước merge | senior-developer | ✅ | `steps/STEP-2.2-auth-implementation.md` | 2026-08-05 08:18 |
 | 2.3 | Review workflow: role annotator vs reviewer, trạng thái ảnh (draft/in-review/approved) ⚠️ security-audit-stride trước merge | senior-developer | ⬜ | `steps/STEP-2.3-review-workflow.md` | - |
 
 ---

@@ -1,7 +1,7 @@
 ---
 task: labeling-studio-improve
 created: 2026-08-04
-updated: 2026-08-05 10:51
+updated: 2026-08-05 11:06
 status: active
 workflow: WF-FEATURE (đa phase)
 priority: P1
@@ -102,7 +102,7 @@ Stack hiện tại: `server/src/` (Express, better-sqlite3, raw SQL), `client/sr
 
 | # | Bước | Agent | Status | Step file | Hoàn thành lúc |
 |---|------|-------|--------|-----------|-----------------|
-| 5.1 | Undo/Redo thật ở tầng ứng dụng (snapshot stack, không chỉ undo điểm vẽ) | senior-developer | ⬜ | `steps/STEP-5.1-undo-redo.md` | - |
+| 5.1 | Undo/Redo thật ở tầng ứng dụng (snapshot stack, không chỉ undo điểm vẽ) | senior-developer | ✅ | `steps/STEP-5.1-undo-redo.md` | 2026-08-05 11:06 |
 | 5.2 | Copy nhãn từ ảnh trước sang ảnh hiện tại (phím tắt, hữu ích cho chuỗi ảnh camera tĩnh) | junior-developer | ⬜ | `steps/STEP-5.2-copy-labels.md` | - |
 | 5.3 | Batch operations: gán class hàng loạt, đổi split, xoá nhiều ảnh | junior-developer | ⬜ | `steps/STEP-5.3-batch-operations.md` | - |
 | 5.4 | Filmstrip/grid xem nhanh nhiều ảnh (thumbnail async theo batch) | senior-developer | ⬜ | `steps/STEP-5.4-filmstrip-grid.md` | - |

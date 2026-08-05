@@ -306,10 +306,20 @@ export default function ProjectDetailPage() {
                   <input type="text" defaultValue={cls.name}
                     onBlur={(e) => e.target.value.trim() && e.target.value !== cls.name && updateClass(cls, { name: e.target.value.trim() })} />
                   <input type="text" className="hotkey-input" maxLength={2} placeholder="—"
-                    defaultValue={cls.hotkey || ''} title="Phím tắt để chọn nhanh nhãn này khi gán nhãn"
+                    defaultValue={cls.hotkey || ''}
+                    title="Phím tắt chữ cái để chọn nhanh nhãn này (VD: a, cd). KHÔNG dùng số 1-9 — các phím đó luôn dành riêng cho chọn nhãn dùng gần nhất (MRU), gõ số vào đây sẽ không có tác dụng."
                     onBlur={(e) => {
                       const v = e.target.value.trim();
-                      if (v !== (cls.hotkey || '')) updateClass(cls, { hotkey: v || null });
+                      if (v !== (cls.hotkey || '')) {
+                        if (v && /^[0-9]+$/.test(v)) {
+                          // BUGFIX: phím 1-9 luôn bị AnnotatorPage bắt làm MRU trước —
+                          // hotkey chỉ gồm số sẽ KHÔNG BAO GIỜ áp dụng được, lưu lại vô nghĩa.
+                          alert('Không thể dùng số làm phím tắt — phím 1-9 luôn dành cho "chọn nhãn dùng gần nhất" (MRU). Hãy dùng chữ cái, ví dụ: a, b, cd.');
+                          e.target.value = cls.hotkey || '';
+                          return;
+                        }
+                        updateClass(cls, { hotkey: v || null });
+                      }
                     }} />
                   <button onClick={() => removeClass(cls)}>✕</button>
                 </div>

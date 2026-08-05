@@ -4,10 +4,18 @@ import { db } from '../db.js';
 
 const router = Router({ mergeParams: true });
 
+// BUGFIX: Phím số 1-9 LUÔN được AnnotatorPage xử lý như "chọn nhãn theo MRU"
+// (xem client onKey: nhánh `e.key >= '1' && e.key <= '9'` return ngay, không
+// bao giờ tới đoạn so khớp custom hotkey). Nếu cho phép lưu hotkey chỉ gồm
+// chữ số, người dùng gõ đúng phím đó nhưng KHÔNG BAO GIỜ áp dụng được nhãn
+// tương ứng — trông như "bấm phím không ăn". Chặn ngay tại DB để tránh lưu
+// hotkey vô dụng, dù client đã validate trước.
 function normalizeHotkey(hotkey) {
   if (typeof hotkey !== 'string') return null;
   const trimmed = hotkey.trim().slice(0, 2);
-  return trimmed || null;
+  if (!trimmed) return null;
+  if (/^[0-9]+$/.test(trimmed)) return null;
+  return trimmed;
 }
 
 router.get('/', (req, res) => {

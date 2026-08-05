@@ -66,6 +66,8 @@ export default function AnnotatorPage() {
   const [prefillLoading, setPrefillLoading] = useState(false);
   /** STEP-4.2: số gợi ý vừa load — hiện banner thông báo để user biết. */
   const [prefillCount, setPrefillCount] = useState(0);
+  /** STEP-5.2: Flag loading khi đang gọi API lấy annotation ảnh trước để copy. */
+  const [copyingLabels, setCopyingLabels] = useState(false);
   const pendingScrollRef = useRef<{ left: number; top: number } | null>(null);
 
   // STEP-5.1: Undo/Redo history (client-side only, cleared on save success / image change)
@@ -147,6 +149,8 @@ export default function AnnotatorPage() {
   }, [projectId, imageId]);
 
   const currentIndex = useMemo(() => images.findIndex((i) => i.id === imageId), [images, imageId]);
+  /** STEP-5.2: ImageItem của ảnh ngay trước trong danh sách (null nếu đang ở ảnh đầu tiên). */
+  const prevImageItem = currentIndex > 0 ? images[currentIndex - 1] : null;
 
   const goTo = useCallback((delta: number) => {
     const next = images[currentIndex + delta];
@@ -312,6 +316,53 @@ export default function AnnotatorPage() {
     scheduleSave(snapshot);
     setPrefillCount(0);
   }, [scheduleSave]);
+
+  // STEP-5.2: Copy toàn bộ annotation từ ảnh liền trước sang ảnh hiện tại.
+  // Dùng api.getImage hiện có — không cần endpoint server mới.
+  // Gọi pushHistorySnapshot() trước khi merge để Ctrl+Z hoàn tác được.
+  const copyLabelsFromPrev = useCallback(async () => {
+    const prevImg = currentIndex > 0 ? images[currentIndex - 1] : null;
+    if (!prevImg || !projectId) return;
+
+    setCopyingLabels(true);
+    let prevAnnotations: Annotation[];
+    try {
+      const prevImgData = await api.getImage(projectId, prevImg.id);
+      prevAnnotations = prevImgData.annotations;
+    } catch {
+      alert('Không thể lấy annotation từ ảnh trước. Vui lòng thử lại.');
+      setCopyingLabels(false);
+      return;
+    }
+    setCopyingLabels(false);
+
+    if (prevAnnotations.length === 0) {
+      alert('Ảnh trước không có annotation nào để copy.');
+      return;
+    }
+
+    const currentBoxCount = boxesRef.current.filter((b) => b.id !== DRAWING_ID).length;
+    if (currentBoxCount > 0) {
+      const ok = confirm(
+        `Ảnh này đã có ${currentBoxCount} nhãn. Thêm ${prevAnnotations.length} nhãn từ ảnh trước vào?`,
+      );
+      if (!ok) return;
+    }
+
+    const copiedBoxes: Box[] = prevAnnotations.map((a) => ({
+      ...annotationToBox(a),
+      // Gán ID mới để tránh xung đột với box gốc từ ảnh trước
+      id: `copy_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    }));
+
+    // STEP-5.1: Push snapshot trước khi thay đổi — cho phép Ctrl+Z hoàn tác việc copy
+    pushHistorySnapshot();
+    setPrefillCount(0);
+    const merged = [...boxesRef.current.filter((b) => b.id !== DRAWING_ID), ...copiedBoxes];
+    setBoxes(merged);
+    scheduleSave(merged);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentIndex, images, projectId, scheduleSave]);
 
   const updateBoxes = (updater: (prev: Box[]) => Box[]) => {
     // STEP-5.1: Push snapshot before every user-initiated box change
@@ -754,6 +805,13 @@ export default function AnnotatorPage() {
         }
       }
 
+      // STEP-5.2: Alt+C → copy labels from previous image
+      if (e.altKey && (e.key === 'c' || e.key === 'C')) {
+        e.preventDefault();
+        copyLabelsFromPrev();
+        return;
+      }
+
       if (e.key === 'Escape' && drawingPoints.length > 0) { cancelDrawing(); return; }
       if ((e.key === 'Delete' || e.key === 'Backspace') && drawingPoints.length > 0) {
         e.preventDefault();
@@ -785,7 +843,7 @@ export default function AnnotatorPage() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selectedId, deleteSelected, classes, goTo, drawingPoints, cancelDrawing, undoLastPoint, assignClassToSelected, image, handleMarkDone, handleUnmarkDone, undo, redo]);
+  }, [selectedId, deleteSelected, classes, goTo, drawingPoints, cancelDrawing, undoLastPoint, assignClassToSelected, image, handleMarkDone, handleUnmarkDone, undo, redo, copyLabelsFromPrev]);
 
   if (!image) return <p>Đang tải ảnh...</p>;
 
@@ -828,6 +886,22 @@ export default function AnnotatorPage() {
             ↪ Làm lại{redoSize > 0 ? ` (${redoSize})` : ''}
           </button>
         </div>
+
+        {/* STEP-5.2: Copy labels from previous image button */}
+        {(() => {
+          const disabled = !prevImageItem || prevImageItem.status === 'unlabeled' || copyingLabels;
+          return (
+            <button
+              className="btn btn-outline"
+              onClick={copyLabelsFromPrev}
+              disabled={disabled}
+              title="Copy toàn bộ nhãn từ ảnh liền trước sang ảnh này (Alt+C). Disable khi ảnh trước chưa có nhãn."
+              style={{ fontSize: 12, padding: '2px 8px', opacity: disabled ? 0.45 : 1 }}
+            >
+              {copyingLabels ? '⏳ Đang copy...' : '📋 Copy nhãn ảnh trước (Alt+C)'}
+            </button>
+          );
+        })()}
 
         <div className="zoom-controls">
           <button className="btn btn-outline" onClick={() => setZoomClamped(zoom / 1.25)} disabled={zoom <= 1} title="Thu nhỏ">−</button>
@@ -962,7 +1036,8 @@ export default function AnnotatorPage() {
             <b>Quad:</b> bấm lần lượt 4 điểm quanh vật xiên/nghiêng.<br />
             Chọn khung để di chuyển / kéo từng điểm góc, hoặc bấm nhãn khác/phím số để đổi nhãn. Delete để xoá khung đã chọn.<br />
             <b>Zoom:</b> lăn chuột hoặc nút +/− trên ảnh. <b>Pan:</b> giữ phím Space rồi kéo (hoặc kéo bằng chuột giữa).<br />
-            <b>Hoàn tác:</b> Ctrl+Z | <b>Làm lại:</b> Ctrl+Y / Ctrl+Shift+Z
+            <b>Hoàn tác:</b> Ctrl+Z | <b>Làm lại:</b> Ctrl+Y / Ctrl+Shift+Z<br />
+            <b>Copy nhãn ảnh trước:</b> Alt+C (camera tĩnh — object ở vị trí tương tự)
           </p>
         </div>
 

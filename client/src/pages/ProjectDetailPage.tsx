@@ -48,6 +48,9 @@ export default function ProjectDetailPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(60);
 
+  // STEP-5.3: Batch selection state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
   const load = useCallback(() => {
     if (!projectId) return;
     api.getProject(projectId).then(setProject);
@@ -137,6 +140,48 @@ export default function ProjectDetailPage() {
     if (!projectId) return;
     const updated = await api.updateImage(projectId, img.id, { split });
     setImages((imgs) => imgs.map((i) => (i.id === img.id ? { ...updated, class_ids: i.class_ids } : i)));
+  };
+
+  // STEP-5.3: Batch selection helpers
+  const toggleSelect = useCallback((id: string, e: React.MouseEvent | React.ChangeEvent) => {
+    e.preventDefault();
+    (e as React.MouseEvent).stopPropagation?.();
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
+
+  const batchChangeSplit = async (split: Split) => {
+    if (!projectId || selectedIds.size === 0) return;
+    const ids = Array.from(selectedIds);
+    const count = ids.length;
+    try {
+      await api.batchUpdateImages(projectId, ids, { split });
+      clearSelection();
+      load();
+      showToast(`Đã đổi split → ${split} cho ${count} ảnh`);
+    } catch (e: any) {
+      showToast(e.message, true);
+    }
+  };
+
+  const batchDelete = async () => {
+    if (!projectId || selectedIds.size === 0) return;
+    const ids = Array.from(selectedIds);
+    const count = ids.length;
+    if (!confirm(`Bạn sắp xoá ${count} ảnh. Thao tác này không thể hoàn tác.`)) return;
+    try {
+      await api.batchDeleteImages(projectId, ids);
+      setImages((imgs) => imgs.filter((i) => !selectedIds.has(i.id)));
+      clearSelection();
+      showToast(`Đã xoá ${count} ảnh`);
+    } catch (e: any) {
+      showToast(e.message, true);
+    }
   };
 
   const classById = useMemo(() => new Map(classes.map((c) => [c.id, c])), [classes]);
@@ -367,6 +412,52 @@ export default function ProjectDetailPage() {
             <span className="filter-count">{filteredImages.length} / {images.length} ảnh</span>
           </div>
 
+          {/* STEP-5.3: Batch action toolbar — hiện khi có ít nhất 1 ảnh được chọn */}
+          {selectedIds.size > 0 && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+              padding: '8px 12px', marginBottom: 8, borderRadius: 6,
+              background: '#251C53', color: '#fff', fontSize: 13,
+            }}>
+              <span style={{ fontWeight: 600 }}>Đã chọn {selectedIds.size} ảnh</span>
+              <button
+                className="btn btn-outline"
+                style={{ color: '#fff', borderColor: '#B8B3D6', fontSize: 12 }}
+                onClick={() => setSelectedIds((prev) => {
+                  const next = new Set(prev);
+                  pagedImages.forEach((img) => next.add(img.id));
+                  return next;
+                })}
+              >
+                Chọn trang này
+              </button>
+              <select
+                style={{ fontSize: 12, padding: '2px 6px', background: '#4A3F8C', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}
+                value=""
+                onChange={(e) => { if (e.target.value) batchChangeSplit(e.target.value as Split); e.target.value = ''; }}
+              >
+                <option value="">Đổi split…</option>
+                <option value="train">→ train</option>
+                <option value="valid">→ valid</option>
+                <option value="test">→ test</option>
+              </select>
+              <button
+                className="btn"
+                style={{ background: '#F05922', color: '#fff', fontSize: 12 }}
+                onClick={batchDelete}
+              >
+                🗑 Xoá {selectedIds.size} ảnh
+              </button>
+              <button
+                className="btn btn-outline"
+                style={{ color: '#fff', borderColor: '#B8B3D6', fontSize: 12, marginLeft: 'auto' }}
+                onClick={clearSelection}
+              >
+                Bỏ chọn
+              </button>
+            </div>
+          )}
+
           {images.length === 0 ? (
             <div className="empty-state card">Chưa có ảnh nào trong project này.</div>
           ) : filteredImages.length === 0 ? (
@@ -376,6 +467,26 @@ export default function ProjectDetailPage() {
               {pagedImages.map((img) => (
                 <Link key={img.id} to={`/projects/${project.id}/annotate/${img.id}`}
                   className={`image-tile ${img.status === 'labeled' ? 'labeled' : ''}`}>
+                  {/* STEP-5.3: Selection overlay + checkbox */}
+                  {selectedIds.has(img.id) && (
+                    <div style={{
+                      position: 'absolute', inset: 0, background: 'rgba(37,28,83,0.35)',
+                      border: '2px solid #251C53', borderRadius: 'inherit', pointerEvents: 'none', zIndex: 1,
+                    }} />
+                  )}
+                  <label
+                    style={{ position: 'absolute', top: 4, left: 4, zIndex: 3, cursor: 'pointer', lineHeight: 0 }}
+                    title="Chọn ảnh này"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(img.id)}
+                      onChange={(e) => toggleSelect(img.id, e)}
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ width: 15, height: 15, cursor: 'pointer' }}
+                    />
+                  </label>
                   <img src={img.thumbnail_url || `/uploads/${project.id}/${img.filename}`} alt={img.original_name} loading="lazy" />
                   <span className={`badge ${img.status === 'labeled' ? 'labeled' : ''}`}>
                     {img.status === 'labeled' ? 'Đã gán' : 'Chưa gán'}

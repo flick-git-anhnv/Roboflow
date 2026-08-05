@@ -113,6 +113,13 @@ async function patch(path, body, token) {
 async function del(path, token) {
   return fetch(`${BASE}${path}`, { method: 'DELETE', headers: h(token) });
 }
+async function delBody(path, body, token) {
+  return fetch(`${BASE}${path}`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', ...h(token) },
+    body: JSON.stringify(body),
+  });
+}
 async function uploadImage(projectId, token) {
   const form = new FormData();
   form.append('images', new Blob([TINY_PNG_BUF], { type: 'image/png' }), 'test.png');
@@ -884,6 +891,138 @@ async function runTests() {
       skip('Row21: reviewer prefill test', 'Không có class hoặc image');
       skip('Row21: annotator prefill test', 'Không có class hoặc image');
     }
+  }
+
+  // ── Row 22: Batch operations (STEP-5.3) ─────────────────────────────────────
+  // PATCH /batch  : all roles 200, unauthenticated 401
+  // DELETE /batch : annotator:own=204, annotator:other=403, reviewer/admin=204, unauth=401
+  console.log('\n── Row 22: Batch operations (STEP-5.3) ──');
+  {
+    // Setup: upload 4 fresh images (2 as annotator, 2 as admin) for batch tests
+    const batchAnn1 = await (await uploadImage(PID, annotatorToken)).json();
+    const batchAnn2 = await (await uploadImage(PID, annotatorToken)).json();
+    const batchAdm1 = await (await uploadImage(PID, adminToken)).json();
+    const batchAdm2 = await (await uploadImage(PID, adminToken)).json();
+    const annId1 = batchAnn1[0]?.id;
+    const annId2 = batchAnn2[0]?.id;
+    const admId1 = batchAdm1[0]?.id;
+    const admId2 = batchAdm2[0]?.id;
+    ok('Row22 setup: upload 4 images', !!(annId1 && annId2 && admId1 && admId2));
+
+    // 1. PATCH batch split — unauthenticated → 401
+    const batchPatchUnauth = await patch(
+      `/api/projects/${PID}/images/batch`,
+      { imageIds: [annId1], split: 'valid' },
+      null,
+    );
+    ok('Row22: PATCH /batch split [unauth → 401]', batchPatchUnauth.status === 401,
+      `got ${batchPatchUnauth.status}`);
+
+    // 2. PATCH batch split — annotator → 200
+    const batchPatchAnn = await patch(
+      `/api/projects/${PID}/images/batch`,
+      { imageIds: [annId1, annId2], split: 'valid' },
+      annotatorToken,
+    );
+    ok('Row22: PATCH /batch split [annotator → 200]', batchPatchAnn.status === 200,
+      `got ${batchPatchAnn.status}`);
+    if (batchPatchAnn.status === 200) {
+      const updated = await batchPatchAnn.json();
+      ok('Row22: PATCH /batch split — trả mảng ảnh đã cập nhật', Array.isArray(updated) && updated.length === 2,
+        `length=${updated?.length}`);
+      ok('Row22: PATCH /batch split — split = valid', updated.every((img) => img.split === 'valid'),
+        `splits=${updated.map((i) => i.split).join(',')}`);
+    }
+
+    // 3. PATCH batch split — reviewer → 200
+    const batchPatchRev = await patch(
+      `/api/projects/${PID}/images/batch`,
+      { imageIds: [admId1], split: 'test' },
+      reviewerToken,
+    );
+    ok('Row22: PATCH /batch split [reviewer → 200]', batchPatchRev.status === 200,
+      `got ${batchPatchRev.status}`);
+
+    // 4. PATCH batch split — admin → 200
+    const batchPatchAdm = await patch(
+      `/api/projects/${PID}/images/batch`,
+      { imageIds: [admId2], split: 'train' },
+      adminToken,
+    );
+    ok('Row22: PATCH /batch split [admin → 200]', batchPatchAdm.status === 200,
+      `got ${batchPatchAdm.status}`);
+
+    // 5. PATCH batch split — empty imageIds → 400
+    const batchPatchEmpty = await patch(
+      `/api/projects/${PID}/images/batch`,
+      { imageIds: [], split: 'train' },
+      adminToken,
+    );
+    ok('Row22: PATCH /batch split [empty imageIds → 400]', batchPatchEmpty.status === 400,
+      `got ${batchPatchEmpty.status}`);
+
+    // 6. DELETE /batch — unauthenticated → 401
+    const batchDelUnauth = await delBody(
+      `/api/projects/${PID}/images/batch`,
+      { imageIds: [annId1] },
+      null,
+    );
+    ok('Row22: DELETE /batch [unauth → 401]', batchDelUnauth.status === 401,
+      `got ${batchDelUnauth.status}`);
+
+    // 7. DELETE /batch — annotator xoá ảnh của MÌNH → 204
+    const batchDelAnnOwn = await delBody(
+      `/api/projects/${PID}/images/batch`,
+      { imageIds: [annId1] },
+      annotatorToken,
+    );
+    ok('Row22: DELETE /batch own images [annotator → 204]', batchDelAnnOwn.status === 204,
+      `got ${batchDelAnnOwn.status}`);
+
+    // 8. DELETE /batch — annotator xoá batch CÓ ảnh của người khác → 403 (toàn batch bị từ chối)
+    const batchDelAnnOther = await delBody(
+      `/api/projects/${PID}/images/batch`,
+      { imageIds: [annId2, admId1] }, // annId2 là của annotator, admId1 là của admin
+      annotatorToken,
+    );
+    ok('Row22: DELETE /batch mixed-owner [annotator → 403]', batchDelAnnOther.status === 403,
+      `got ${batchDelAnnOther.status}`);
+    const batchDelAnnOtherData = await batchDelAnnOther.json();
+    ok('Row22: DELETE /batch 403 trả error=AUTH_FORBIDDEN',
+      batchDelAnnOtherData.error === 'AUTH_FORBIDDEN',
+      `error=${batchDelAnnOtherData.error}`);
+    // Verify annId2 CHƯA bị xoá (batch bị từ chối toàn bộ)
+    const annId2Check = await get(`/api/projects/${PID}/images/${annId2}`, adminToken);
+    ok('Row22: annId2 vẫn còn sau khi batch 403 (không xoá 1 phần)',
+      annId2Check.status === 200,
+      `got ${annId2Check.status}`);
+
+    // 9. DELETE /batch — reviewer xoá bất kỳ → 204
+    const batchDelRev = await delBody(
+      `/api/projects/${PID}/images/batch`,
+      { imageIds: [annId2] },
+      reviewerToken,
+    );
+    ok('Row22: DELETE /batch any [reviewer → 204]', batchDelRev.status === 204,
+      `got ${batchDelRev.status}`);
+
+    // 10. DELETE /batch — admin xoá bất kỳ → 204
+    const batchDelAdm = await delBody(
+      `/api/projects/${PID}/images/batch`,
+      { imageIds: [admId1, admId2] },
+      adminToken,
+    );
+    ok('Row22: DELETE /batch any [admin → 204]', batchDelAdm.status === 204,
+      `got ${batchDelAdm.status}`);
+
+    // 11. DELETE /batch — empty imageIds → 400
+    const batchDelEmpty = await delBody(
+      `/api/projects/${PID}/images/batch`,
+      { imageIds: [] },
+      adminToken,
+    );
+    ok('Row22: DELETE /batch [empty imageIds → 400]', batchDelEmpty.status === 400,
+      `got ${batchDelEmpty.status}`);
   }
 
   // ── Rate limit test ───────────────────────────────────────────────────────

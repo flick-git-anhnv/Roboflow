@@ -165,6 +165,95 @@ router.post('/upload-zip', zipUpload.single('zip'), async (req, res) => {
   res.status(201).json({ created, skipped });
 });
 
+// ── PATCH /batch — đổi split hàng loạt ─────────────────────────────────────
+// STEP-5.3 Body: { imageIds: string[], split: 'train' | 'valid' | 'test' }
+// Role: tất cả role đều được đổi split (cùng pattern PATCH /:imageId — không hạn chế split).
+// batch-assign-class: KHÔNG implement — class gắn với annotation, không phải image;
+// "gán class cho ảnh" sẽ tạo ra annotation không có bbox → vô nghĩa về mặt dữ liệu.
+router.patch('/batch', (req, res) => {
+  const { imageIds, split } = req.body;
+  if (!Array.isArray(imageIds) || imageIds.length === 0) {
+    return res.status(400).json({ error: 'imageIds phải là mảng không rỗng' });
+  }
+  if (split !== undefined && !['train', 'valid', 'test'].includes(split)) {
+    return res.status(400).json({ error: 'split phải là train, valid hoặc test' });
+  }
+
+  const placeholders = imageIds.map(() => '?').join(',');
+  const found = db.prepare(
+    `SELECT * FROM images WHERE id IN (${placeholders}) AND project_id = ?`
+  ).all(...imageIds, req.params.projectId);
+
+  if (found.length !== imageIds.length) {
+    const foundSet = new Set(found.map((i) => i.id));
+    const missing = imageIds.filter((id) => !foundSet.has(id));
+    return res.status(404).json({ error: `Không tìm thấy ảnh: ${missing.join(', ')}` });
+  }
+
+  if (split !== undefined) {
+    db.prepare(`UPDATE images SET split = ? WHERE id IN (${placeholders})`)
+      .run(split, ...imageIds);
+    logActivity(req.params.projectId, req.user?.id ?? null, 'batch_split_change', {
+      count: imageIds.length,
+      to: split,
+    });
+  }
+
+  const updated = db.prepare(`SELECT * FROM images WHERE id IN (${placeholders})`).all(...imageIds);
+  res.json(updated);
+});
+
+// ── DELETE /batch — xoá nhiều ảnh ────────────────────────────────────────────
+// STEP-5.3 Body: { imageIds: string[] }
+// Role: annotator chỉ xoá ảnh mình upload; reviewer/admin xoá bất kỳ.
+//       Nếu 1 ảnh trong batch không đủ quyền → 403 toàn batch (không xoá 1 phần).
+router.delete('/batch', (req, res) => {
+  const { imageIds } = req.body;
+  if (!Array.isArray(imageIds) || imageIds.length === 0) {
+    return res.status(400).json({ error: 'imageIds phải là mảng không rỗng' });
+  }
+
+  const placeholders = imageIds.map(() => '?').join(',');
+  const found = db.prepare(
+    `SELECT * FROM images WHERE id IN (${placeholders}) AND project_id = ?`
+  ).all(...imageIds, req.params.projectId);
+
+  if (found.length !== imageIds.length) {
+    const foundSet = new Set(found.map((i) => i.id));
+    const missing = imageIds.filter((id) => !foundSet.has(id));
+    return res.status(404).json({ error: `Không tìm thấy ảnh: ${missing.join(', ')}` });
+  }
+
+  // Role check: annotator chỉ xoá ảnh mình upload; nếu 1 ảnh không đủ quyền → từ chối cả batch
+  if (req.user?.role === 'annotator') {
+    const unauthorized = found.filter(
+      (img) => img.uploaded_by === null || img.uploaded_by !== req.user.id
+    );
+    if (unauthorized.length > 0) {
+      return res.status(403).json({
+        error: 'AUTH_FORBIDDEN',
+        detail: `Annotator chỉ được xoá ảnh của mình. Có ${unauthorized.length} ảnh trong batch không thuộc quyền sở hữu.`,
+        unauthorizedIds: unauthorized.map((i) => i.id),
+      });
+    }
+  }
+
+  // Xoá file vật lý
+  for (const img of found) {
+    fs.unlink(path.join(UPLOAD_DIR, req.params.projectId, img.filename), () => {});
+  }
+
+  // Xoá DB — CASCADE tự xoá annotations + annotation_history liên quan
+  db.prepare(`DELETE FROM images WHERE id IN (${placeholders})`).run(...imageIds);
+
+  logActivity(req.params.projectId, req.user?.id ?? null, 'batch_image_delete', {
+    count: found.length,
+    filenames: found.map((i) => i.original_name),
+  });
+
+  res.status(204).end();
+});
+
 router.patch('/:imageId', (req, res) => {
   const existing = db.prepare('SELECT * FROM images WHERE id = ? AND project_id = ?')
     .get(req.params.imageId, req.params.projectId);

@@ -271,10 +271,14 @@ Roboflow - Copy/
 | GET | `/:imageId` | images.js:64 | Get single image + annotations + **annotationVersion** (STEP-3.4) |
 | POST | `/upload` | images.js:73 | Upload nhiều file ảnh (multer.array) |
 | POST | `/upload-zip` | images.js:95 | Upload ZIP chứa ảnh |
-| PATCH | `/:imageId` | images.js:143 | Update split/status |
-| DELETE | `/:imageId` | images.js:153 | Delete image + xóa file vật lý |
+| PATCH | `/batch` | images.js:~168 | **[STEP-5.3 MỚI]** Đổi split hàng loạt. Body: `{imageIds, split}`. Tất cả role. Trả `ImageItem[]`. |
+| DELETE | `/batch` | images.js:~205 | **[STEP-5.3 MỚI]** Xoá nhiều ảnh. Body: `{imageIds}`. Annotator chỉ xoá ảnh mình upload; 403 toàn batch nếu có ảnh không đủ quyền. |
+| PATCH | `/:imageId` | images.js:~250 | Update split/status |
+| DELETE | `/:imageId` | images.js:~270 | Delete image + xóa file vật lý |
 
 **[STEP-3.4]** `GET /:imageId` response nay trả thêm `annotationVersion: number` = `COALESCE(MAX(version), 0)` từ `annotation_history` của ảnh. Client dùng giá trị này làm `expectedVersion` khi gọi PUT annotations.
+
+**[STEP-5.3]** Batch routes phải đặt TRƯỚC `/:imageId` trong Express để tránh static `/batch` bị match vào dynamic `:imageId`. `batch-assign-class` KHÔNG implement — class gắn với annotation (có bbox), không phải image trực tiếp.
 
 ---
 
@@ -848,10 +852,12 @@ Các interface chính:
 | GET | /api/projects/:pid/images/:iid | images.js:64 | ImageWithAnnotations |
 | POST | /api/projects/:pid/images/upload | images.js:73 | ImageItem[] (201) |
 | POST | /api/projects/:pid/images/upload-zip | images.js:95 | {created, skipped} (201) |
-| PATCH | /api/projects/:pid/images/:iid | images.js:143 | ImageItem |
+| PATCH | /api/projects/:pid/images/batch | images.js:~168 | ImageItem[] — **STEP-5.3 MỚI** body `{imageIds,split}` |
+| DELETE | /api/projects/:pid/images/batch | images.js:~205 | 204 — **STEP-5.3 MỚI** body `{imageIds}`; annotator:own only else 403 |
+| PATCH | /api/projects/:pid/images/:iid | images.js:~250 | ImageItem |
 | POST | /api/projects/:pid/images/:iid/mark-done | images.js:~200 | ImageItem (completed_at, completed_by set) — STEP-3.5 MỚI |
 | DELETE | /api/projects/:pid/images/:iid/mark-done | images.js:~220 | ImageItem (completed_at=null, completed_by=null) — STEP-3.5 MỚI; annotator chỉ bỏ của mình (403 nếu người khác) |
-| DELETE | /api/projects/:pid/images/:iid | images.js:~253 | 204 |
+| DELETE | /api/projects/:pid/images/:iid | images.js:~270 | 204 |
 
 ### Annotations
 
@@ -1154,3 +1160,4 @@ Query params export: `format=yolo\|coco\|voc`, `splitMode=manual\|auto`, `trainR
 | 2026-08-05 | senior-developer (STEP-3.4) | Cập nhật §3.5 (GET /:imageId trả thêm annotationVersion), §3.6 (annotations.js — optimistic locking: check expectedVersion trước transaction, PUT response đổi từ Annotation[] thành {annotations, annotationVersion}), §4.2 (api.ts — saveAnnotations thêm tham số expectedVersion), §4.3 (ImageWithAnnotations.annotationVersion), §4.4 (AnnotatorPage — annotationVersionRef, 409 handling), §7 (PUT annotations response 409), §9 Phase 3.4 DONE — 113 test pass (0 fail, 0 skip), tsc 0 lỗi | (STEP-3.4) |
 | 2026-08-05 | senior-developer (STEP-3.5) | Cập nhật §6 (images — 2 cột mới completed_at/completed_by + index), §7 (Images — 2 endpoint MỚI POST/DELETE mark-done; reviews.js gate IMAGE_NOT_COMPLETED), §9 Phase 3.5 DONE — 128 test pass (0 fail, 0 skip), tsc 0 lỗi. **Phase 3 HOÀN TOÀN HOÀN THÀNH.** | (STEP-3.5) |
 | 2026-08-05 | senior-developer (STEP-4.1) | Thêm bảng `detect_cache` (§6), route `DELETE /cache` (§3.10/§7), cache raw detections theo (image_id, model_id) trong `autolabel.js`, `inference_service.py` trả thêm `conf`, §9 Phase 4.1 DONE — 133 test pass (0 fail, 0 skip) | ac61d98→(STEP-4.1) |
+| 2026-08-05 | junior-developer (STEP-5.3) | Cập nhật §3.5 (images.js — 2 route MỚI PATCH /batch + DELETE /batch), §7 (Images API table), §4.2 (api.ts — batchUpdateImages, batchDeleteImages), §4.4 (ProjectDetailPage — selectedIds state, toggleSelect, batchChangeSplit, batchDelete, batch toolbar UI, checkbox mỗi tile), tests Row 22 (16 test case). STEP-5.3 DONE — 162 test pass (0 fail, 0 skip), tsc 0 lỗi | (STEP-5.3) |

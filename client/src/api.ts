@@ -188,6 +188,24 @@ export const api = {
       body: JSON.stringify({ model_id: modelId }),
     }),
 
+  // ── Batch operations (STEP-5.3) ────────────────────────────────────────────
+  /** Đổi split hàng loạt. Role: tất cả được dùng. */
+  batchUpdateImages: (projectId: string, imageIds: string[], patch: { split?: string }) =>
+    request<ImageItem[]>(`/api/projects/${projectId}/images/batch`, {
+      method: 'PATCH',
+      body: JSON.stringify({ imageIds, ...patch }),
+    }),
+  /**
+   * Xoá nhiều ảnh cùng lúc (file vật lý + annotations qua CASCADE).
+   * Annotator: chỉ xoá ảnh mình upload; reviewer/admin: xoá bất kỳ.
+   * Nếu 1 ảnh trong batch không đủ quyền → 403 toàn batch.
+   */
+  batchDeleteImages: (projectId: string, imageIds: string[]) =>
+    request<void>(`/api/projects/${projectId}/images/batch`, {
+      method: 'DELETE',
+      body: JSON.stringify({ imageIds }),
+    }),
+
   // ── Review workflow (STEP-2.3) ───────────────────────────────────────────────
   submitReview: (imageId: string) =>
     request<ImageItem>(`/api/images/${imageId}/submit-review`, { method: 'POST', body: JSON.stringify({}) }),

@@ -61,7 +61,7 @@ Tạo detect cache persist: sau khi inference service trả kết quả cho 1 �
 
 ## Commit
 
-- Hash: [điền ngay bên dưới sau khi commit]
+- Hash: 2efad59
 - Đã push: có
 - Đã push: [có/không]
 

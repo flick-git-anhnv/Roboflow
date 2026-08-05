@@ -617,8 +617,14 @@ a { color: inherit; text-decoration: none; }
   background: #16131f;
   border-radius: 12px;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  /* BUGFIX zoom/pan: "center" thường (không "safe") trên flex container có
+   * overflow là bug CSS kinh điển — khi canvas (con) lớn hơn container do
+   * zoom, phần ĐẦU nội dung tràn ra bị flexbox cắt và KHÔNG THỂ scroll tới
+   * được (scrollLeft/Top = 0 không tới mép thật của ảnh). "safe center" giữ
+   * hành vi căn giữa khi ảnh còn nhỏ (chưa zoom), nhưng tự chuyển về
+   * start-alignment khi nội dung tràn — đảm bảo luôn scroll được hết ảnh. */
+  align-items: safe center;
+  justify-content: safe center;
   overflow: auto;
   position: relative;
   min-height: 0;

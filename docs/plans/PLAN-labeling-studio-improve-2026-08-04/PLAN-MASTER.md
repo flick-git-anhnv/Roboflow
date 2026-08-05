@@ -1,7 +1,7 @@
 ---
 task: labeling-studio-improve
 created: 2026-08-04
-updated: 2026-08-05 11:42
+updated: 2026-08-05 11:53
 status: active
 workflow: WF-FEATURE (đa phase)
 priority: P1
@@ -116,7 +116,7 @@ Stack hiện tại: `server/src/` (Express, better-sqlite3, raw SQL), `client/sr
 
 | # | Bước | Agent | Status | Step file | Hoàn thành lúc |
 |---|------|-------|--------|-----------|-----------------|
-| 6.1 | Model versioning + metadata so sánh hiệu năng (ngày train, dataset, mAP) | junior-developer | ⬜ | `steps/STEP-6.1-model-versioning.md` | - |
+| 6.1 | Model versioning + metadata so sánh hiệu năng (ngày train, dataset, mAP) | junior-developer | ✅ | `steps/STEP-6.1-model-versioning.md` | 2026-08-05 11:53 |
 | 6.2 | Coverage-based sampling khi thu thập ảnh tự động | senior-developer | ⬜ | `steps/STEP-6.2-coverage-sampling.md` | - |
 | 6.3 | Duplicate detection + validate dataset (ảnh trùng, annotation lỗi, class không dùng) | junior-developer | ⬜ | `steps/STEP-6.3-duplicate-validate.md` | - |
 
@@ -177,6 +177,7 @@ Không có hiện tại.
 | 2026-08-05 10:51 | Bước 4.2 ✅ Done — m008 `projects.default_model_id`, routes/prefill.js (GET prefill + PATCH default-model), AnnotatorPage auto-call prefill (setBoxes, không scheduleSave, banner UI), ProjectDetailPage UI chọn model mặc định (reviewer/admin), Row 21 (13 case). 146 passed, 0 failed. tsc 0 lỗi. Commit 3475fdd. **Phase 4 HOÀN THÀNH.** | senior-developer |
 | 2026-08-05 11:32 | Bước 5.1–5.4 ✅ Done — undo/redo, copy labels from prev, batch operations, filmstrip. Commits bba89b3..a72b38c. 162 passed. | senior-developer |
 | 2026-08-05 11:42 | Bước 5.5 ✅ Done — MRU 1-9, Ctrl+K fuzzy switcher, hotkey 2-char buffer. normalizeHotkey→2-char, fuzzyMatch(), switcher modal, sidebar MRU display. Commit 0adcf60. 162 passed, tsc 0 lỗi. **Phase 5 HOÀN THÀNH.** | senior-developer |
+| 2026-08-05 11:53 | Bước 6.1 ✅ Done — m009 migration (notes/map_score/version_label), PATCH endpoint, UI sort+badge+inline edit. Commit b5b8feb. 175 passed (13 Row23 mới), tsc 0 lỗi. | junior-developer |
 
 ---
 **Status icons:** ⬜ Todo | 🔄 In Progress | ✅ Done | 🛑 Blocked | ⏭️ Skipped

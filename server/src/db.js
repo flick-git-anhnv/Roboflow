@@ -492,6 +492,46 @@ function m008_default_model_id() {
 
 m008_default_model_id();
 
+// ─── m009_model_metadata ───────────────────────────────────────────────────────
+// STEP-6.1: Model versioning + metadata so sánh hiệu năng.
+//   Thêm 3 cột nullable vào bảng `models`:
+//   notes TEXT        — ghi chú tự do (dataset dùng, ngày train, thông số v.v.)
+//   map_score REAL    — điểm mAP nếu người dùng biết và muốn nhập tay (nullable)
+//                       KHÔNG tự tính mAP — cần ground truth riêng, ngoài scope.
+//   version_label TEXT — nhãn phiên bản do user đặt (VD "v1", "v2-augmented")
+//
+// Idempotent: kiểm tra PRAGMA table_info(models) trước ALTER TABLE.
+// Verify: row count models trước/sau (CTO condition #1 pattern, nhất quán m006-m008).
+function m009_model_metadata() {
+  const modelCols = db.prepare('PRAGMA table_info(models)').all().map((c) => c.name);
+  const needsNotes        = !modelCols.includes('notes');
+  const needsMapScore     = !modelCols.includes('map_score');
+  const needsVersionLabel = !modelCols.includes('version_label');
+
+  if (!needsNotes && !needsMapScore && !needsVersionLabel) return; // already migrated
+
+  const before = db.prepare('SELECT COUNT(*) AS n FROM models').get().n;
+  console.log(`[INFO] m009: models row count BEFORE migration: ${before}`);
+
+  db.transaction(() => {
+    if (needsNotes)        db.exec('ALTER TABLE models ADD COLUMN notes TEXT');
+    if (needsMapScore)     db.exec('ALTER TABLE models ADD COLUMN map_score REAL');
+    if (needsVersionLabel) db.exec('ALTER TABLE models ADD COLUMN version_label TEXT');
+  })();
+
+  const after = db.prepare('SELECT COUNT(*) AS n FROM models').get().n;
+  console.log(`[INFO] m009: models row count AFTER  migration: ${after}`);
+
+  if (after < before) {
+    const msg = `[CRITICAL] DATA LOSS in models: ${before} rows → ${after} rows. Migration: m009_model_metadata`;
+    console.error(msg);
+    throw new Error(msg);
+  }
+  console.log('[INFO] m009: model metadata columns added (notes, map_score, version_label) ✓');
+}
+
+m009_model_metadata();
+
 // ─── Retention helper: annotation_history ─────────────────────────────────────
 // Gọi bởi STEP-3.2 (routes/history.js) ngay sau mỗi INSERT INTO annotation_history.
 // Giữ tối đa 200 version gần nhất mỗi ảnh (ADR AD-5 retention policy).

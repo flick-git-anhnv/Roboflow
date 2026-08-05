@@ -88,6 +88,10 @@ export interface ModelInfo {
   filename: string;
   original_name: string;
   created_at: string;
+  /** STEP-6.1: metadata so sánh hiệu năng — nullable, user tự nhập tay */
+  notes?: string | null;
+  map_score?: number | null;
+  version_label?: string | null;
 }
 
 /** STEP-4.2: Gợi ý bbox từ endpoint /prefill (server đã map class_id, đã filter conf). */

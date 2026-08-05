@@ -146,6 +146,16 @@ export const api = {
   },
   deleteModel: (projectId: string, modelId: string) =>
     request<void>(`/api/projects/${projectId}/models/${modelId}`, { method: 'DELETE' }),
+  /** STEP-6.1: Cập nhật metadata model (notes, map_score, version_label). Role: reviewer/admin. */
+  updateModel: (
+    projectId: string,
+    modelId: string,
+    patch: { notes?: string | null; map_score?: number | null; version_label?: string | null },
+  ) =>
+    request<ModelInfo>(`/api/projects/${projectId}/models/${modelId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
 
   startAutoLabel: (
     projectId: string,

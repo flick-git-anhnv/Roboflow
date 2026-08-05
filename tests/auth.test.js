@@ -23,6 +23,9 @@
  *  Row 20: detect_cache endpoints (STEP-4.1) → unauthenticated 401, authenticated 200
  *  Row 21: prefill bbox (STEP-4.2) → unauthenticated 401, annotator PATCH 403,
  *          no default model 422, image-with-annotations → 200 {suggestions:[]}
+ *  Row 22: Batch operations (STEP-5.3) → unauthenticated 401, authenticated 200
+ *  Row 23: Model metadata PATCH (STEP-6.1) → unauth 401, annotator 403, reviewer/admin 200,
+ *          invalid map_score 400, nonexistent 404, empty body 400
  *
  * Security warning tests (ADR §6.3):
  *  W1: Same error message for wrong username vs wrong password
@@ -1023,6 +1026,109 @@ async function runTests() {
     );
     ok('Row22: DELETE /batch [empty imageIds → 400]', batchDelEmpty.status === 400,
       `got ${batchDelEmpty.status}`);
+  }
+
+  // ── Row 23: Model metadata PATCH (STEP-6.1) ──────────────────────────────
+  // PATCH /api/projects/:pid/models/:mid
+  //   unauthenticated → 401
+  //   annotator       → 403
+  //   reviewer        → 200 (lưu đúng notes/map_score/version_label)
+  //   admin           → 200
+  //   invalid map_score (>1) → 400
+  //   PATCH nonexistent model → 404
+  console.log('\n── Row 23: Model metadata PATCH (STEP-6.1) ──');
+  {
+    // Setup: upload 1 model as admin để dùng cho các test
+    const mUpload = await uploadModel(adminToken);
+    ok('Row23 setup: upload model for metadata tests', mUpload.status === 201);
+    const mMeta = mUpload.status === 201 ? await mUpload.json() : null;
+    const META_MID = mMeta?.id;
+
+    if (!META_MID) {
+      skip('Row23: all metadata tests', 'Model upload failed');
+    } else {
+      // 1. unauthenticated → 401
+      const patchUnauth = await patch(
+        `/api/projects/${PID}/models/${META_MID}`,
+        { notes: 'test' },
+        null,
+      );
+      ok('Row23: PATCH metadata [unauth → 401]', patchUnauth.status === 401,
+        `got ${patchUnauth.status}`);
+
+      // 2. annotator → 403
+      const patchAnnotator = await patch(
+        `/api/projects/${PID}/models/${META_MID}`,
+        { notes: 'annotator note' },
+        annotatorToken,
+      );
+      ok('Row23: PATCH metadata [annotator → 403]', patchAnnotator.status === 403,
+        `got ${patchAnnotator.status}`);
+
+      // 3. reviewer → 200, lưu đúng notes + map_score + version_label
+      const patchReviewer = await patch(
+        `/api/projects/${PID}/models/${META_MID}`,
+        { notes: 'dataset_v2, 100 epochs', map_score: 0.87, version_label: 'v2-aug' },
+        reviewerToken,
+      );
+      ok('Row23: PATCH metadata [reviewer → 200]', patchReviewer.status === 200,
+        `got ${patchReviewer.status}`);
+      if (patchReviewer.status === 200) {
+        const updated = await patchReviewer.json();
+        ok('Row23: notes lưu đúng', updated.notes === 'dataset_v2, 100 epochs',
+          `notes=${updated.notes}`);
+        ok('Row23: map_score lưu đúng (≈0.87)', Math.abs((updated.map_score ?? 0) - 0.87) < 0.0001,
+          `map_score=${updated.map_score}`);
+        ok('Row23: version_label lưu đúng', updated.version_label === 'v2-aug',
+          `version_label=${updated.version_label}`);
+      }
+
+      // 4. admin → 200, PATCH partial (chỉ notes — không mất map_score)
+      const patchAdmin = await patch(
+        `/api/projects/${PID}/models/${META_MID}`,
+        { notes: 'updated by admin' },
+        adminToken,
+      );
+      ok('Row23: PATCH metadata [admin → 200]', patchAdmin.status === 200,
+        `got ${patchAdmin.status}`);
+      if (patchAdmin.status === 200) {
+        const adminUpdated = await patchAdmin.json();
+        ok('Row23: PATCH partial — notes cập nhật', adminUpdated.notes === 'updated by admin',
+          `notes=${adminUpdated.notes}`);
+        ok('Row23: PATCH partial — map_score giữ nguyên (0.87)', Math.abs((adminUpdated.map_score ?? 0) - 0.87) < 0.0001,
+          `map_score=${adminUpdated.map_score}`);
+      }
+
+      // 5. invalid map_score > 1 → 400
+      const patchBadScore = await patch(
+        `/api/projects/${PID}/models/${META_MID}`,
+        { map_score: 1.5 },
+        adminToken,
+      );
+      ok('Row23: PATCH invalid map_score 1.5 → 400', patchBadScore.status === 400,
+        `got ${patchBadScore.status}`);
+
+      // 6. nonexistent model → 404
+      const patchNotFound = await patch(
+        `/api/projects/${PID}/models/nonexistent-model-id`,
+        { notes: 'x' },
+        adminToken,
+      );
+      ok('Row23: PATCH nonexistent model → 404', patchNotFound.status === 404,
+        `got ${patchNotFound.status}`);
+
+      // 7. empty body → 400
+      const patchEmpty = await patch(
+        `/api/projects/${PID}/models/${META_MID}`,
+        {},
+        adminToken,
+      );
+      ok('Row23: PATCH empty body → 400', patchEmpty.status === 400,
+        `got ${patchEmpty.status}`);
+
+      // Cleanup: xoá model sau khi test xong
+      await del(`/api/projects/${PID}/models/${META_MID}`, adminToken);
+    }
   }
 
   // ── Rate limit test ───────────────────────────────────────────────────────

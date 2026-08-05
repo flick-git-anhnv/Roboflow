@@ -42,6 +42,40 @@ router.post('/upload', requireRole('reviewer', 'admin'), upload.single('model'),
   res.status(201).json(db.prepare('SELECT * FROM models WHERE id = ?').get(id));
 });
 
+// PATCH /:modelId — cập nhật metadata model (notes, map_score, version_label)
+// Role guard: reviewer + admin (same as upload/delete — AD-A5)
+router.patch('/:modelId', requireRole('reviewer', 'admin'), (req, res) => {
+  const existing = db.prepare('SELECT * FROM models WHERE id = ? AND project_id = ?')
+    .get(req.params.modelId, req.params.projectId);
+  if (!existing) return res.status(404).json({ error: 'Không tìm thấy model' });
+
+  const { notes, map_score, version_label } = req.body;
+
+  // Validate map_score nếu được cung cấp (phải là số [0, 1] hoặc null)
+  if (map_score !== undefined && map_score !== null) {
+    const val = Number(map_score);
+    if (isNaN(val) || val < 0 || val > 1) {
+      return res.status(400).json({ error: 'map_score phải là số thực trong khoảng [0, 1]' });
+    }
+  }
+
+  // Chỉ cập nhật field được cung cấp (PATCH semantics — không ghi đè field không có trong body)
+  const updates = {};
+  if (notes        !== undefined) updates.notes         = notes ?? null;
+  if (map_score    !== undefined) updates.map_score     = map_score !== null ? Number(map_score) : null;
+  if (version_label !== undefined) updates.version_label = version_label ?? null;
+
+  if (Object.keys(updates).length === 0) {
+    return res.status(400).json({ error: 'Cần ít nhất 1 field: notes, map_score, hoặc version_label' });
+  }
+
+  const setClauses = Object.keys(updates).map((k) => `${k} = ?`).join(', ');
+  db.prepare(`UPDATE models SET ${setClauses} WHERE id = ?`)
+    .run(...Object.values(updates), req.params.modelId);
+
+  res.json(db.prepare('SELECT * FROM models WHERE id = ?').get(req.params.modelId));
+});
+
 router.delete('/:modelId', requireRole('reviewer', 'admin'), (req, res) => {
   const existing = db.prepare('SELECT * FROM models WHERE id = ? AND project_id = ?')
     .get(req.params.modelId, req.params.projectId);

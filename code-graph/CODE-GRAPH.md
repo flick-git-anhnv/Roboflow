@@ -3,7 +3,7 @@
 > Tài liệu bản đồ codebase. Mọi coding agent PHẢI đọc file này TRƯỚC khi mở source.
 > Cập nhật ngay sau mỗi PR merge có thay đổi cấu trúc/API/schema.
 >
-> Last verified: 2026-08-05 | Cập nhật: senior-developer (STEP-4.1)
+> Last verified: 2026-08-05 | Cập nhật: junior-developer (STEP-6.1)
 
 ---
 
@@ -342,7 +342,8 @@ Roboflow - Copy/
 |---|---|---|---|
 | GET | `/` | models.js:26 | List models của project |
 | POST | `/upload` | models.js:32 | Upload file .pt (max 1GB) |
-| DELETE | `/:modelId` | models.js:43 | Delete model + xóa file .pt |
+| **PATCH** | `/:modelId` | models.js:46 | **[STEP-6.1]** Cập nhật metadata (notes, map_score, version_label) — reviewer/admin only |
+| DELETE | `/:modelId` | models.js:80 | Delete model + xóa file .pt |
 
 ---
 
@@ -541,7 +542,7 @@ saveAnnotations(imageId, annotations, expectedVersion?)   ← [STEP-3.4] thêm t
   → throw Error('ANNOTATION_CONFLICT') nếu server trả 409
 exportUrl, getSplitPreview
 getStats
-listModels, uploadModel, deleteModel
+listModels, uploadModel, deleteModel, **updateModel** (STEP-6.1 — PATCH metadata)
 startAutoLabel, getAutoLabelJob
 markImageDone, unmarkImageDone
 submitReview, approveReview, rejectReview
@@ -561,7 +562,7 @@ Các interface chính:
 - `ImageItem` — id, project_id, filename, original_name, width, height, split, status, created_at, class_ids[], thumbnail_url? (STEP-1.3), review_status?, review_comment?, reviewed_by?, reviewed_at? (STEP-2.3)
 - `Annotation` — id, image_id, class_id, x, y, w, h, type, points
 - `ImageWithAnnotations` — ImageItem + annotations[] + **annotationVersion: number** (STEP-3.4 — version dùng cho optimistic locking)
-- `ModelInfo` — id, project_id, filename, original_name, created_at
+- `ModelInfo` — id, project_id, filename, original_name, created_at, **notes?, map_score?, version_label?** (STEP-6.1)
 - `AutoLabelJob` — status, total, done, created, failed, error, unmatchedClasses[]
 - **`SuggestedBox`** (STEP-4.2 MỚI) — class_id, x, y, w, h, type:'bbox'|'quad', conf, points?
 
@@ -588,11 +589,12 @@ Các interface chính:
 
 ### 4.5 `client/src/pages/ProjectDetailPage.tsx` — Image grid
 
-| API calls | listClasses, listImages, uploadImages, uploadZip, updateImage, deleteImage, **listModels** [STEP-4.2], **setDefaultModel** [STEP-4.2] |
+| API calls | listClasses, listImages, uploadImages, uploadZip, updateImage, deleteImage, **listModels** [STEP-4.2], **setDefaultModel** [STEP-4.2], **updateModel** [STEP-6.1] |
 |---|---|
 | Features | Filter by status/split/class/search, pagination (page×pageSize), drag-drop upload |
 | Modals | StatsPanel, ExportModal, AutoLabelModal |
-| **[STEP-4.2] Default model UI** | Section "Model mặc định (Prefill)" trong side panel: list models, nút "Đặt mặc định" / badge "★ Mặc định" / nút "Bỏ mặc định". Chỉ reviewer/admin mới thấy (role check). |
+| **[STEP-4.2] Default model UI** | Section "Quản lý Model" trong side panel: list models, nút "Đặt mặc định" / badge "✓ Mặc định" / nút "Bỏ mặc định". Chỉ reviewer/admin mới thấy (role check). |
+| **[STEP-6.1] Model metadata UI** | Sort models by map_score DESC (null last); badge "★ Best" cho model có map_score cao nhất; badge version_label; hiển thị mAP%, notes inline; nút "✏️ Sửa" mở form inline nhập notes/map_score/version_label; save qua PATCH; `sortedModels` + `bestModelId` dùng useMemo. |
 
 ---
 
@@ -781,8 +783,12 @@ Các interface chính:
 | filename | TEXT | NOT NULL (tên file .pt trên disk) |
 | original_name | TEXT | NOT NULL (tên gốc khi upload) |
 | created_at | TEXT | NOT NULL DEFAULT datetime('now') |
+| **notes** | TEXT | nullable — **[STEP-6.1]** ghi chú tự do (dataset, thông số train) |
+| **map_score** | REAL | nullable — **[STEP-6.1]** điểm mAP user nhập tay, range [0,1] |
+| **version_label** | TEXT | nullable — **[STEP-6.1]** nhãn phiên bản (VD "v1", "v2-augmented") |
 
 **Index:** `idx_models_project ON models(project_id)`
+**Migration:** `m009_model_metadata()` trong `db.js` — idempotent (PRAGMA table_info check), verify row count trước/sau (CTO condition #1 pattern)
 
 ### Bảng `detect_cache` — STEP-4.1 MỚI
 
@@ -893,7 +899,8 @@ Query params export: `format=yolo\|coco\|voc`, `splitMode=manual\|auto`, `trainR
 |---|---|---|---|
 | GET | /api/projects/:pid/models | models.js:26 | ModelInfo[] |
 | POST | /api/projects/:pid/models/upload | models.js:32 | ModelInfo (201) |
-| DELETE | /api/projects/:pid/models/:mid | models.js:43 | 204 |
+| **PATCH** | **/api/projects/:pid/models/:mid** | models.js:46 | **ModelInfo (200) — [STEP-6.1] cập nhật notes/map_score/version_label; reviewer/admin; 400 nếu map_score ngoài [0,1] hoặc body rỗng; 404 nếu không tìm thấy** |
+| DELETE | /api/projects/:pid/models/:mid | models.js:80 | 204 |
 
 ### Auto-label
 
@@ -1137,9 +1144,11 @@ Query params export: `format=yolo\|coco\|voc`, `splitMode=manual\|auto`, `trainR
 ### Phase 6.1 — Model versioning
 
 **Files bị ảnh hưởng:**
-- `server/src/db.js` — ALTER TABLE `models` ADD COLUMN `metadata JSON`
-- `server/src/routes/models.js` — thêm PATCH endpoint, GET endpoint với metadata
-- `client/src/types.ts` — mở rộng `ModelInfo`
+- `server/src/db.js` — `m009_model_metadata()` ALTER TABLE models ADD 3 cột (notes, map_score, version_label) ✅ STEP-6.1
+- `server/src/routes/models.js` — PATCH /:modelId cập nhật metadata ✅ STEP-6.1
+- `client/src/types.ts` — ModelInfo thêm notes?, map_score?, version_label? ✅ STEP-6.1
+- `client/src/api.ts` — api.updateModel() ✅ STEP-6.1
+- `client/src/pages/ProjectDetailPage.tsx` — sort + badge + inline edit ✅ STEP-6.1
 
 ---
 
@@ -1161,3 +1170,4 @@ Query params export: `format=yolo\|coco\|voc`, `splitMode=manual\|auto`, `trainR
 | 2026-08-05 | senior-developer (STEP-3.5) | Cập nhật §6 (images — 2 cột mới completed_at/completed_by + index), §7 (Images — 2 endpoint MỚI POST/DELETE mark-done; reviews.js gate IMAGE_NOT_COMPLETED), §9 Phase 3.5 DONE — 128 test pass (0 fail, 0 skip), tsc 0 lỗi. **Phase 3 HOÀN TOÀN HOÀN THÀNH.** | (STEP-3.5) |
 | 2026-08-05 | senior-developer (STEP-4.1) | Thêm bảng `detect_cache` (§6), route `DELETE /cache` (§3.10/§7), cache raw detections theo (image_id, model_id) trong `autolabel.js`, `inference_service.py` trả thêm `conf`, §9 Phase 4.1 DONE — 133 test pass (0 fail, 0 skip) | ac61d98→(STEP-4.1) |
 | 2026-08-05 | junior-developer (STEP-5.3) | Cập nhật §3.5 (images.js — 2 route MỚI PATCH /batch + DELETE /batch), §7 (Images API table), §4.2 (api.ts — batchUpdateImages, batchDeleteImages), §4.4 (ProjectDetailPage — selectedIds state, toggleSelect, batchChangeSplit, batchDelete, batch toolbar UI, checkbox mỗi tile), tests Row 22 (16 test case). STEP-5.3 DONE — 162 test pass (0 fail, 0 skip), tsc 0 lỗi | (STEP-5.3) |
+| 2026-08-05 | junior-developer (STEP-6.1) | Cập nhật §3.9 (models.js — PATCH /:modelId MỚI), §6 (bảng models — 3 cột mới notes/map_score/version_label + m009), §7 (Models API PATCH), §4.2 (api.ts — updateModel), §4.3 (ModelInfo thêm 3 field), §4.5 (ProjectDetailPage — sortedModels, bestModelId, inline edit, badges), §9 Phase 6.1 DONE — 175 test pass (0 fail, 0 skip), tsc 0 lỗi | (STEP-6.1) |

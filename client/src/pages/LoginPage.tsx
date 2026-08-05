@@ -21,7 +21,10 @@ export default function LoginPage() {
       // Token stored in cookie by server; also cache in sessionStorage for Bearer header
       sessionStorage.setItem('kztek_token', data.token);
       sessionStorage.setItem('kztek_user', JSON.stringify(data.user));
-      navigate(from, { replace: true });
+      // Full reload (không dùng navigate()) để App.tsx remount và đọc lại
+      // sessionStorage — nếu không, header sẽ không hiện user/nút đăng xuất
+      // cho đến khi user tự F5 (App chỉ đọc user 1 lần lúc mount ban đầu).
+      window.location.replace(from);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Đăng nhập thất bại';
       if (msg.includes('AUTH_INVALID_CREDENTIALS')) {

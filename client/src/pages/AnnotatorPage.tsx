@@ -60,6 +60,10 @@ export default function AnnotatorPage() {
   const annotationVersionRef = useRef<number>(0);
 
   const [zoom, setZoom] = useState(1);
+  /** BUGFIX zoom/pan: mirror của zoom, đọc trong wheel listener native để tránh stale closure
+   * (listener gắn 1 lần qua addEventListener, không re-tạo mỗi lần zoom đổi). */
+  const zoomRef = useRef(1);
+  useEffect(() => { zoomRef.current = zoom; }, [zoom]);
   const [spaceHeld, setSpaceHeld] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
   /** STEP-4.2: trạng thái gọi prefill tự động khi mở ảnh chưa có annotation. */
@@ -107,6 +111,9 @@ export default function AnnotatorPage() {
   /** Sizes for disabling Undo/Redo buttons in toolbar (re-render trigger). */
   const [undoSize, setUndoSize] = useState(0);
   const [redoSize, setRedoSize] = useState(0);
+  /** Box đã copy (Ctrl+C) — lưu ref vì không cần trigger render riêng, chỉ cần hasClipboard để enable nút Dán. */
+  const clipboardBoxRef = useRef<Box | null>(null);
+  const [hasClipboard, setHasClipboard] = useState(false);
 
   /** Keep boxesRef in sync with boxes state (runs after each render). */
   useEffect(() => { boxesRef.current = boxes; }, [boxes]);
@@ -559,23 +566,39 @@ export default function AnnotatorPage() {
 
   const setZoomClamped = (z: number) => setZoom(clamp(z, 1, 8));
 
-  const onWheelZoom = (e: React.WheelEvent) => {
-    if (!containerRef.current) return;
-    e.preventDefault();
+  // BUGFIX zoom/pan (giống bản desktop tool): React gắn onWheel dưới dạng passive
+  // listener theo mặc định (React 17+) → e.preventDefault() bị trình duyệt bỏ qua
+  // (console warning "Unable to preventDefault inside passive event listener"),
+  // khiến trình duyệt VẪN tự scroll native song song với logic zoom tự tính toán
+  // ở đây → giật/lệch khi lăn chuột thay vì zoom mượt tại đúng vị trí con trỏ như
+  // tool cũ (canvas_zoom.py dùng Tkinter bind thường, không có passive listener).
+  // Fix: gắn wheel handler bằng addEventListener({passive:false}) trong useEffect
+  // dưới đây (native listener, không qua JSX onWheel) để preventDefault() có hiệu lực.
+  useEffect(() => {
     const container = containerRef.current;
-    const rect = container.getBoundingClientRect();
-    const contentX = e.clientX - rect.left + container.scrollLeft;
-    const contentY = e.clientY - rect.top + container.scrollTop;
-    const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
-    const newZoom = clamp(zoom * factor, 1, 8);
-    if (newZoom === zoom) return;
-    const ratio = newZoom / zoom;
-    pendingScrollRef.current = {
-      left: contentX * ratio - (e.clientX - rect.left),
-      top: contentY * ratio - (e.clientY - rect.top),
+    if (!container) return;
+    const handler = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = container.getBoundingClientRect();
+      const contentX = e.clientX - rect.left + container.scrollLeft;
+      const contentY = e.clientY - rect.top + container.scrollTop;
+      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+      const currentZoom = zoomRef.current;
+      const newZoom = clamp(currentZoom * factor, 1, 8);
+      if (newZoom === currentZoom) return;
+      const ratio = newZoom / currentZoom;
+      pendingScrollRef.current = {
+        left: contentX * ratio - (e.clientX - rect.left),
+        top: contentY * ratio - (e.clientY - rect.top),
+      };
+      setZoom(newZoom);
     };
-    setZoom(newZoom);
-  };
+    container.addEventListener('wheel', handler, { passive: false });
+    return () => container.removeEventListener('wheel', handler);
+    // deps=[image]: component return sớm "Đang tải ảnh..." khi !image (containerRef
+    // CHƯA gắn vào DOM lúc đó) — phải re-run effect sau khi image load xong để
+    // containerRef.current mới thật sự tồn tại, nếu không listener gắn vào null mãi.
+  }, [image]);
 
   const startPan = (e: React.MouseEvent) => {
     const container = containerRef.current;
@@ -842,6 +865,45 @@ export default function AnnotatorPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId]);
 
+  /** Copy box đang chọn vào "clipboard" nội bộ (Ctrl+C) — chưa tạo box mới, chỉ lưu lại để dán. */
+  const copySelectedBox = useCallback(() => {
+    if (!selectedId) return;
+    const box = boxesRef.current.find((b) => b.id === selectedId);
+    if (!box) return;
+    clipboardBoxRef.current = cloneBox(box);
+    setHasClipboard(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
+
+  /** Dán box đã copy (Ctrl+V) — tạo bản sao mới, lệch nhẹ để không đè hẳn lên box gốc, rồi chọn nó luôn. */
+  const pasteBox = useCallback(() => {
+    const src = clipboardBoxRef.current;
+    if (!src || !image) return;
+    const OFFSET = 16;
+    const maxX = Math.max(0, image.width - src.w);
+    const maxY = Math.max(0, image.height - src.h);
+    const newId = `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const pasted: Box = {
+      ...cloneBox(src),
+      id: newId,
+      x: clamp(src.x + OFFSET, 0, maxX),
+      y: clamp(src.y + OFFSET, 0, maxY),
+    };
+    if (pasted.type === 'quad' && pasted.points) {
+      pasted.points = pasted.points.map((p) => ({
+        x: clamp(p.x + OFFSET, 0, image.width),
+        y: clamp(p.y + OFFSET, 0, image.height),
+      })) as [Point, Point, Point, Point];
+    }
+    pushHistorySnapshot();
+    setPrefillCount(0);
+    const next = [...boxesRef.current.filter((b) => b.id !== DRAWING_ID), pasted];
+    setBoxes(next);
+    scheduleSave(next);
+    setSelectedId(newId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [image, scheduleSave]);
+
   const assignClassToSelected = useCallback((classId: string) => {
     setActiveClassId(classId);
     pushToMru(classId);
@@ -924,6 +986,15 @@ export default function AnnotatorPage() {
         if (key === 'y') {
           e.preventDefault();
           redo();
+          return;
+        }
+        // Ctrl+C / Ctrl+V → copy/dán 1 box đang chọn (khác Alt+C: copy toàn bộ nhãn từ ảnh trước)
+        if (key === 'c') {
+          if (selectedId) { e.preventDefault(); copySelectedBox(); }
+          return;
+        }
+        if (key === 'v') {
+          if (clipboardBoxRef.current) { e.preventDefault(); pasteBox(); }
           return;
         }
       }
@@ -1012,7 +1083,7 @@ export default function AnnotatorPage() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selectedId, deleteSelected, classes, goTo, drawingPoints, cancelDrawing, undoLastPoint, assignClassToSelected, image, handleMarkDone, handleUnmarkDone, undo, redo, copyLabelsFromPrev, mruClassIds]);
+  }, [selectedId, deleteSelected, classes, goTo, drawingPoints, cancelDrawing, undoLastPoint, assignClassToSelected, image, handleMarkDone, handleUnmarkDone, undo, redo, copyLabelsFromPrev, mruClassIds, copySelectedBox, pasteBox]);
 
   if (!image) return <p>Đang tải ảnh...</p>;
 
@@ -1031,6 +1102,28 @@ export default function AnnotatorPage() {
           <button className={`tool-btn ${tool === 'quad' ? 'active' : ''}`}
             onClick={() => setTool('quad')} title="Chấm 4 điểm — phù hợp cho biển số bị xiên/nghiêng">
             ◈ Chấm 4 điểm (Quad)
+          </button>
+        </div>
+
+        {/* Copy/Dán 1 box đang chọn (Ctrl+C / Ctrl+V) */}
+        <div style={{ display: 'flex', gap: 4 }}>
+          <button
+            className="btn btn-outline"
+            onClick={copySelectedBox}
+            disabled={!selectedId}
+            title="Copy khung đang chọn (Ctrl+C)"
+            style={{ fontSize: 12, padding: '2px 8px', opacity: !selectedId ? 0.45 : 1 }}
+          >
+            ⧉ Copy (Ctrl+C)
+          </button>
+          <button
+            className="btn btn-outline"
+            onClick={pasteBox}
+            disabled={!hasClipboard}
+            title="Dán khung đã copy, lệch nhẹ vị trí để dễ nhận ra (Ctrl+V)"
+            style={{ fontSize: 12, padding: '2px 8px', opacity: !hasClipboard ? 0.45 : 1 }}
+          >
+            📄 Dán (Ctrl+V)
           </button>
         </div>
 
@@ -1227,8 +1320,9 @@ export default function AnnotatorPage() {
             <b>Box:</b> kéo chuột để vẽ khung chữ nhật.<br />
             <b>Quad:</b> bấm lần lượt 4 điểm quanh vật xiên/nghiêng.<br />
             Delete = xoá khung đã chọn.<br />
-            <b>Zoom:</b> lăn chuột hoặc nút +/−. <b>Pan:</b> Space + kéo.<br />
+            <b>Zoom:</b> lăn chuột (tại vị trí con trỏ) hoặc nút +/−. <b>Pan:</b> Space + kéo, hoặc giữ chuột giữa + kéo.<br />
             <b>Hoàn tác:</b> Ctrl+Z | <b>Làm lại:</b> Ctrl+Y<br />
+            <b>Copy/Dán khung đang chọn:</b> Ctrl+C / Ctrl+V<br />
             <b>Copy nhãn ảnh trước:</b> Alt+C<br />
             <b>Chọn class nhanh:</b> <b>Ctrl+K</b> (fuzzy search)<br />
             <b>Phím 1-9:</b> 9 class MRU (dùng gần nhất = 1)<br />
@@ -1237,7 +1331,7 @@ export default function AnnotatorPage() {
         </div>
 
         <div className={`canvas-stage ${spaceHeld ? 'pan-ready' : ''} ${isPanning ? 'panning' : ''}`}
-          ref={containerRef} onWheel={onWheelZoom}>
+          ref={containerRef}>
           {!imgEl && <span className="canvas-loading">Đang tải ảnh...</span>}
           <canvas ref={canvasRef}
             onMouseDown={onMouseDown} onMouseMove={onMouseMove}

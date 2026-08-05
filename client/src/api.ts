@@ -1,12 +1,41 @@
-import type { Annotation, AutoLabelJob, ClassLabel, ImageItem, ImageWithAnnotations, ModelInfo, Project } from './types';
+import type { Annotation, AutoLabelJob, ClassLabel, ImageItem, ImageWithAnnotations, ModelInfo, Project, User } from './types';
 
+// ── Token helpers ──────────────────────────────────────────────────────────────
+// Token stored as httpOnly cookie (server-set) AND cached in sessionStorage for
+// Bearer header (required when cookie not sent, e.g. Postman/CI tests).
+export function getToken(): string | null {
+  return sessionStorage.getItem('kztek_token');
+}
+
+export function clearAuth() {
+  sessionStorage.removeItem('kztek_token');
+  sessionStorage.removeItem('kztek_user');
+}
+
+// ── Core request wrapper ───────────────────────────────────────────────────────
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
+  const token = getToken();
+  const extraHeaders: Record<string, string> = {};
+  if (token) extraHeaders['Authorization'] = `Bearer ${token}`;
+  if (options?.body && !(options.body instanceof FormData)) {
+    extraHeaders['Content-Type'] = 'application/json';
+  }
+
   const res = await fetch(url, {
     ...options,
-    headers: options?.body && !(options.body instanceof FormData)
-      ? { 'Content-Type': 'application/json', ...(options?.headers || {}) }
-      : options?.headers,
+    credentials: 'include', // send httpOnly cookie kztek_token
+    headers: { ...extraHeaders, ...(options?.headers || {}) },
   });
+
+  // 401 → clear local auth and redirect to /login (interceptor)
+  if (res.status === 401) {
+    clearAuth();
+    if (!window.location.pathname.startsWith('/login')) {
+      window.location.replace('/login?reason=session_expired');
+    }
+    throw new Error('AUTH_REQUIRED');
+  }
+
   if (!res.ok) {
     let message = `Lỗi ${res.status}`;
     try {
@@ -22,6 +51,18 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  // ── Auth ──────────────────────────────────────────────────────────────────
+  login: (username: string, password: string) =>
+    request<{ token: string; user: User }>('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    }),
+  logout: async () => {
+    await request<void>('/api/auth/logout', { method: 'POST' });
+    clearAuth();
+  },
+  getMe: () => request<User>('/api/auth/me'),
+
   listProjects: () => request<Project[]>('/api/projects'),
   createProject: (name: string, description: string) =>
     request<Project>('/api/projects', { method: 'POST', body: JSON.stringify({ name, description }) }),

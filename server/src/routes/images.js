@@ -7,6 +7,7 @@ import sharp from 'sharp';
 import AdmZip from 'adm-zip';
 import { nanoid } from 'nanoid';
 import { db, UPLOAD_DIR } from '../db.js';
+import { requireRole } from '../middleware/roles.js';
 
 const router = Router({ mergeParams: true });
 
@@ -75,16 +76,17 @@ router.post('/upload', upload.array('images', MAX_FILES_PER_UPLOAD), async (req,
   const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.projectId);
   if (!project) return res.status(404).json({ error: 'Không tìm thấy project' });
 
+  const uploaderId = req.user?.id ?? null; // AD-A5: ghi người upload để enforce owner-delete
   const created = [];
   const insert = db.prepare(`
-    INSERT INTO images (id, project_id, filename, original_name, width, height)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO images (id, project_id, filename, original_name, width, height, uploaded_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
   for (const file of req.files || []) {
     try {
       const meta = await sharp(file.path).metadata();
       const id = nanoid();
-      insert.run(id, req.params.projectId, file.filename, file.originalname, meta.width || 0, meta.height || 0);
+      insert.run(id, req.params.projectId, file.filename, file.originalname, meta.width || 0, meta.height || 0, uploaderId);
       created.push(db.prepare('SELECT * FROM images WHERE id = ?').get(id));
     } catch (e) {
       fs.unlink(file.path, () => {});
@@ -101,11 +103,12 @@ router.post('/upload-zip', zipUpload.single('zip'), async (req, res) => {
   const destDir = path.join(UPLOAD_DIR, req.params.projectId);
   fs.mkdirSync(destDir, { recursive: true });
 
+  const uploaderId = req.user?.id ?? null;
   const created = [];
   let skipped = 0;
   const insert = db.prepare(`
-    INSERT INTO images (id, project_id, filename, original_name, width, height)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO images (id, project_id, filename, original_name, width, height, uploaded_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
   try {
@@ -126,7 +129,7 @@ router.post('/upload-zip', zipUpload.single('zip'), async (req, res) => {
         const filename = `${nanoid()}${ext}`;
         fs.writeFileSync(path.join(destDir, filename), buffer);
         const id = nanoid();
-        insert.run(id, req.params.projectId, filename, path.basename(entry.entryName), meta.width || 0, meta.height || 0);
+        insert.run(id, req.params.projectId, filename, path.basename(entry.entryName), meta.width || 0, meta.height || 0, uploaderId);
         created.push(db.prepare('SELECT * FROM images WHERE id = ?').get(id));
       } catch {
         skipped++;
@@ -145,19 +148,37 @@ router.patch('/:imageId', (req, res) => {
   const existing = db.prepare('SELECT * FROM images WHERE id = ? AND project_id = ?')
     .get(req.params.imageId, req.params.projectId);
   if (!existing) return res.status(404).json({ error: 'Không tìm thấy ảnh' });
+
   const { split, status } = req.body;
+
+  // AD-A5: Bỏ đánh dấu "Xong" (status='unlabeled') của người khác → annotator không được
+  if (status === 'unlabeled' && req.user?.role === 'annotator') {
+    const isOwner = existing.uploaded_by !== null && existing.uploaded_by === req.user.id;
+    if (!isOwner) {
+      return res.status(403).json({ error: 'AUTH_FORBIDDEN', detail: 'Annotator chỉ được bỏ done ảnh của mình' });
+    }
+  }
+
   db.prepare('UPDATE images SET split = ?, status = ? WHERE id = ?')
     .run(split ?? existing.split, status ?? existing.status, req.params.imageId);
   res.json(db.prepare('SELECT * FROM images WHERE id = ?').get(req.params.imageId));
 });
 
+// AD-A5: Xoá ảnh MÌNH upload (annotator = self only; reviewer/admin = any)
 router.delete('/:imageId', (req, res) => {
   const existing = db.prepare('SELECT * FROM images WHERE id = ? AND project_id = ?')
     .get(req.params.imageId, req.params.projectId);
-  if (existing) {
-    fs.unlink(path.join(UPLOAD_DIR, req.params.projectId, existing.filename), () => {});
-    db.prepare('DELETE FROM images WHERE id = ?').run(req.params.imageId);
+  if (!existing) return res.status(204).end(); // idempotent
+
+  if (req.user?.role === 'annotator') {
+    const isOwner = existing.uploaded_by !== null && existing.uploaded_by === req.user.id;
+    if (!isOwner) {
+      return res.status(403).json({ error: 'AUTH_FORBIDDEN', detail: 'Annotator chỉ được xoá ảnh mình upload' });
+    }
   }
+
+  fs.unlink(path.join(UPLOAD_DIR, req.params.projectId, existing.filename), () => {});
+  db.prepare('DELETE FROM images WHERE id = ?').run(req.params.imageId);
   res.status(204).end();
 });
 

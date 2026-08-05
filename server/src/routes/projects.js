@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { nanoid } from 'nanoid';
 import { db } from '../db.js';
+import { requireRole } from '../middleware/roles.js';
 
 const router = Router();
 
@@ -45,7 +46,8 @@ router.patch('/:id', (req, res) => {
   res.json(db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id));
 });
 
-router.delete('/:id', (req, res) => {
+// AD-A5: Xoá project → admin only
+router.delete('/:id', requireRole('admin'), (req, res) => {
   db.prepare('DELETE FROM projects WHERE id = ?').run(req.params.id);
   res.status(204).end();
 });

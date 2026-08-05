@@ -1,3 +1,16 @@
+export type UserRole = 'annotator' | 'reviewer' | 'admin';
+
+export interface User {
+  id: number;
+  username: string;
+  display_name: string;
+  role: UserRole;
+  color: string;
+  is_active?: number;
+  created_at?: string;
+  last_login_at?: string | null;
+}
+
 export interface Project {
   id: string;
   name: string;

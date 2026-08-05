@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import bcrypt from 'bcrypt';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -110,3 +111,57 @@ db.prepare(`
       updated_at = datetime('now')
   WHERE status IN ('running', 'pending')
 `).run();
+
+// ─── m003_add_users ────────────────────────────────────────────────────────────
+// AD-A1: Schema bảng users + seed admin đầu tiên.
+// Idempotent: CREATE TABLE IF NOT EXISTS + COUNT check trước khi seed.
+// AD-A5: images.uploaded_by → FK users(id) để enforce owner-based delete rule.
+// Synchronous: dùng bcrypt.hashSync để không làm phức tạp module init.
+function m003_add_users() {
+  // Create users table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      username       TEXT    NOT NULL UNIQUE,
+      password_hash  TEXT    NOT NULL,
+      display_name   TEXT    NOT NULL,
+      role           TEXT    NOT NULL CHECK(role IN ('annotator','reviewer','admin')),
+      color          TEXT    NOT NULL DEFAULT '#4A3F8C',
+      is_active      INTEGER NOT NULL DEFAULT 1,
+      created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
+      last_login_at  TEXT
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username);
+  `);
+
+  // Add uploaded_by to images if not present (AD-A5: owner-based delete)
+  const imageCols = db.prepare("PRAGMA table_info(images)").all().map((c) => c.name);
+  if (!imageCols.includes('uploaded_by')) {
+    db.exec('ALTER TABLE images ADD COLUMN uploaded_by INTEGER REFERENCES users(id)');
+  }
+
+  // AD-A6: Seed admin đầu tiên — chỉ khi bảng users còn rỗng
+  const count = db.prepare('SELECT COUNT(*) AS n FROM users').get().n;
+  if (count === 0) {
+    const adminUser = (process.env.AUTH_BOOTSTRAP_ADMIN_USER || 'admin').toLowerCase();
+    const adminPass = process.env.AUTH_BOOTSTRAP_ADMIN_PASSWORD || 'kztek@2026';
+    // hashSync blocks ~100-300ms — acceptable at startup only
+    const hash = bcrypt.hashSync(adminPass, 12);
+
+    db.prepare(
+      "INSERT INTO users (username, password_hash, display_name, role, color) VALUES (?, ?, ?, 'admin', '#251C53')"
+    ).run(adminUser, hash, 'Administrator');
+
+    if (process.env.AUTH_BOOTSTRAP_ADMIN_USER && process.env.AUTH_BOOTSTRAP_ADMIN_PASSWORD) {
+      console.log(`[INFO] Bootstrap admin created: ${adminUser}`);
+    } else {
+      console.log('############################################################');
+      console.log('# [SECURITY WARN] Default admin created: admin / kztek@2026');
+      console.log('# ĐỔI MẬT KHẨU NGAY LẦN LOGIN ĐẦU TIÊN');
+      console.log('# Hoặc set AUTH_BOOTSTRAP_ADMIN_* trước khi restart lần đầu');
+      console.log('############################################################');
+    }
+  }
+}
+
+m003_add_users();

@@ -4,6 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { nanoid } from 'nanoid';
 import { db, MODEL_DIR } from '../db.js';
+import { requireRole } from '../middleware/roles.js';
 
 const router = Router({ mergeParams: true });
 
@@ -29,7 +30,8 @@ router.get('/', (req, res) => {
   res.json(models);
 });
 
-router.post('/upload', upload.single('model'), (req, res) => {
+// AD-A5: CRUD models (upload/delete) → reviewer + admin only
+router.post('/upload', requireRole('reviewer', 'admin'), upload.single('model'), (req, res) => {
   const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.projectId);
   if (!project) return res.status(404).json({ error: 'Không tìm thấy project' });
   if (!req.file) return res.status(400).json({ error: 'Không nhận được file model' });
@@ -40,7 +42,7 @@ router.post('/upload', upload.single('model'), (req, res) => {
   res.status(201).json(db.prepare('SELECT * FROM models WHERE id = ?').get(id));
 });
 
-router.delete('/:modelId', (req, res) => {
+router.delete('/:modelId', requireRole('reviewer', 'admin'), (req, res) => {
   const existing = db.prepare('SELECT * FROM models WHERE id = ? AND project_id = ?')
     .get(req.params.modelId, req.params.projectId);
   if (existing) {

@@ -1,9 +1,14 @@
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { UPLOAD_DIR } from './db.js';
+import { authRequired } from './middleware/auth.js';
+import authRouter from './routes/auth.js';
+import usersRouter from './routes/users.js';
 import projectsRouter from './routes/projects.js';
 import classesRouter from './routes/classes.js';
 import imagesRouter from './routes/images.js';
@@ -83,12 +88,46 @@ process.on('exit', stopInferenceService);
   });
 });
 
-// ─── Express setup ────────────────────────────────────────────────────────────
+// ─── Middleware stack (AD-A4 thứ tự bắt buộc) ────────────────────────────────
 
-app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+// 1. Helmet: security headers (CSP, X-Frame-Options, X-Content-Type-Options...)
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' }, // cho phép serve images qua /uploads
+}));
+
+// 2. CORS siết lại theo AD-A8 — chỉ cho origin trong CORS_ORIGIN
+const CORS_ORIGIN = (process.env.CORS_ORIGIN || 'http://localhost:5173')
+  .split(',').map((s) => s.trim()).filter(Boolean);
+
+app.use(cors({
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true); // curl/Postman không có Origin header
+    if (CORS_ORIGIN.includes(origin)) return cb(null, true);
+    return cb(new Error('CORS blocked: ' + origin));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
+
+// 3. Body parser + static uploads
+app.use(express.json({ limit: '2mb' }));
 app.use('/uploads', express.static(UPLOAD_DIR));
 
+// 4. Cookie parser — phải trước authRequired để đọc được cookie kztek_token
+app.use(cookieParser());
+
+// 5. Public health endpoint — bypass auth
+app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
+
+// 6. Auth router — login PUBLIC; logout + me protected inside the router
+app.use('/api/auth', authRouter);
+
+// 7. authRequired global: áp cho toàn bộ /api/* còn lại (kể cả GET — AD-A4)
+app.use('/api', authRequired);
+
+// 8. Protected routes
+app.use('/api/users', usersRouter);
 app.use('/api/projects', projectsRouter);
 app.use('/api/projects/:projectId/classes', classesRouter);
 app.use('/api/projects/:projectId/images', imagesRouter);
@@ -100,6 +139,7 @@ app.use('/api/projects/:projectId/auto-label', autolabelRouter);
 app.use('/api/jobs', jobsRouter);
 app.use('/api/images', thumbnailsRouter);
 
+// ─── SPA fallback ─────────────────────────────────────────────────────────────
 const clientDist = path.join(__dirname, '..', '..', 'client', 'dist');
 app.use(express.static(clientDist));
 app.get('*', (req, res, next) => {

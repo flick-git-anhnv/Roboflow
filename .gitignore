@@ -10,3 +10,7 @@ Thumbs.db
 __pycache__/
 *.pyc
 *.tsbuildinfo
+
+# Auth secrets (AD-A3)
+server/.env
+server/data/.jwt-secret.dev

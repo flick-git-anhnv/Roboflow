@@ -1191,7 +1191,13 @@ export default function AnnotatorPage() {
       >
         <div className="side-panel" style={{ position: 'static' }}>
           <div>
-            <h4>{selectedId ? 'Đổi nhãn khung đã chọn' : 'Chọn nhãn (bấm phím tắt)'}</h4>
+            <h4 style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              color: selectedId ? 'var(--orange)' : undefined,
+            }}>
+              {selectedId && <span style={{ fontSize: 11 }}>●</span>}
+              {selectedId ? 'Đổi nhãn khung đã chọn' : 'Chọn nhãn cho khung mới (chưa chọn khung nào)'}
+            </h4>
             <div className="class-list-scroll">
               {classes.map((c) => {
                 const highlighted = selectedId

@@ -606,8 +606,37 @@ Các interface chính:
 | type | TEXT | NOT NULL DEFAULT 'bbox' (bbox/quad) — migration nếu chưa có |
 | points | TEXT | nullable, JSON string [[{x,y}×4]] cho type=quad — migration nếu chưa có |
 | created_at | TEXT | NOT NULL DEFAULT datetime('now') |
+| version | INTEGER | NOT NULL DEFAULT 0 — STEP-3.1 MỚI (optimistic locking, dùng ở STEP-3.4) |
 
 **Index:** `idx_annotations_image ON annotations(image_id)`
+
+### Bảng `annotation_history` — STEP-3.1 MỚI
+
+| Cột | Kiểu | Ràng buộc |
+|---|---|---|
+| id | INTEGER | PRIMARY KEY AUTOINCREMENT |
+| image_id | TEXT | NOT NULL, FK→images(id) ON DELETE CASCADE |
+| version | INTEGER | NOT NULL |
+| snapshot | TEXT | NOT NULL — JSON toàn bộ annotations của ảnh tại thời điểm save (SNAPSHOT, không diff — ADR AD-5) |
+| actor_id | INTEGER | FK→users(id), nullable |
+| created_at | TEXT | NOT NULL DEFAULT datetime('now') |
+
+**Index:** `idx_ann_history_image`, `idx_ann_history_img_ver(image_id, version DESC)`. **Retention:** tối đa 200 version/ảnh qua `pruneAnnotationHistory(imageId)` (export từ `db.js`, gọi bởi STEP-3.2).
+
+### Bảng `activity_log` — STEP-3.1 MỚI
+
+| Cột | Kiểu | Ràng buộc |
+|---|---|---|
+| id | INTEGER | PRIMARY KEY AUTOINCREMENT |
+| project_id | TEXT | NOT NULL, FK→projects(id) ON DELETE CASCADE |
+| actor_id | INTEGER | FK→users(id), nullable |
+| action | TEXT | NOT NULL (VD: 'upload', 'export', 'split_change') |
+| detail | TEXT | nullable, JSON tuỳ ý |
+| created_at | TEXT | NOT NULL DEFAULT datetime('now') |
+
+**Index:** `idx_activity_log_project`, `idx_activity_log_action`. Route ghi log: STEP-3.3 (bảng đã tạo, chưa có route ghi ở STEP-3.1).
+
+**⚠️ Lưu ý:** `actor_id` không có `ON DELETE CASCADE/SET NULL` (mặc định NO ACTION) — không thể hard-delete user đã có history/activity_log khi `foreign_keys=ON`. Dùng `is_active=0` (soft-delete, đã có từ STEP-2.2) thay vì xoá thật.
 
 ### Bảng `models`
 
@@ -838,15 +867,17 @@ Query params export: `format=yolo\|coco\|voc`, `splitMode=manual\|auto`, `trainR
 
 ---
 
-### Phase 3.1 — DB Migration (ĐỤNG SCHEMA HIỆN CÓ)
+### Phase 3.1 — DB Migration (ĐỤNG SCHEMA HIỆN CÓ) — ✅ HOÀN THÀNH
 
 **Files bị ảnh hưởng:**
-- `server/src/db.js` — ALTER TABLE `annotations` ADD COLUMN `version INTEGER DEFAULT 0`; CREATE TABLE `annotation_history`; CREATE TABLE `activity_log`
-- `server/src/routes/annotations.js` — UPDATE `version` khi save, INSERT vào `annotation_history`
+- `server/src/db.js` — `m005_phase3_schema()`: cột `annotations.version` DEFAULT 0, bảng `annotation_history` (snapshot), `activity_log`; auto-backup `.bak-{ts}` (giữ 5 bản) + verify row count trước/sau (throw nếu mất dữ liệu — CTO condition #1); export `pruneAnnotationHistory()`.
+- **Chưa đụng** `server/src/routes/annotations.js` — route UPDATE version + INSERT history là việc của STEP-3.2, bước này CHỈ tạo schema.
 
-**Depth-1 callers sẽ break nếu migration sai:** tất cả code đọc/ghi bảng `annotations` (annotations.js, images.js:64, export.js, stats.js, autolabel.js).
+**Kết quả verify row count (thực tế đã chạy):** projects 2→2, classes 4→4, images 1→1, annotations 0→0, models 0→0, jobs 0→0, users 1→1 — không mất dữ liệu ở bảng nào.
 
-**Watch out:** Bảng `annotation_history` và `activity_log` cần `actor_id FK→users.id` — Phase 2 (bảng `users`) PHẢI hoàn thành trước.
+**Depth-1 callers sẽ break nếu STEP-3.2 sai:** tất cả code đọc/ghi bảng `annotations` (annotations.js, images.js:64, export.js, stats.js, autolabel.js) — CHƯA đổi ở bước này, cần re-verify khi STEP-3.2 sửa `annotations.js`.
+
+**Watch out:** `annotation_history.snapshot` là SNAPSHOT JSON (không diff) — STEP-3.2 revert = ghi đè thẳng, không merge. `actor_id` không có `ON DELETE CASCADE` — không hard-delete user có history.
 
 ---
 
@@ -895,3 +926,4 @@ Query params export: `format=yolo\|coco\|voc`, `splitMode=manual\|auto`, `trainR
 | 2026-08-04 | tech-lead+cto+em (STEP-2.1) | Auth ADR riêng (`ADR-auth-labeling-studio.md`), security-audit-stride, CTO+EM APPROVED kèm điều kiện #A1/#A2 | (STEP-2.1) |
 | 2026-08-04 | senior-developer (STEP-2.2) | Bảng `users` (INTEGER id, role, color), routes auth.js/users.js, middleware, LoginPage — 87 test pass ma trận AD-A5, npm audit sạch (điều kiện #A1/#A2 đạt), §9 Phase 2.2 DONE | (STEP-2.2) |
 | 2026-08-04 | senior-developer (STEP-2.3) | Thêm §3.13 reviews.js (MỚI), cập nhật §6 bảng `images` (4 cột review), §9 Phase 2.3 DONE — review workflow submit/approve/reject, Row 8 test pass | (STEP-2.3) |
+| 2026-08-05 | senior-developer (STEP-3.1) | Cập nhật §6 — cột `annotations.version`, bảng mới `annotation_history` (snapshot), `activity_log`; §9 Phase 3.1 DONE — verify row count trước/sau (0 mất dữ liệu, CTO condition #1 đạt) | (STEP-3.1) |

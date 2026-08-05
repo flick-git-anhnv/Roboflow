@@ -1,7 +1,7 @@
 ---
 task: labeling-studio-improve
 created: 2026-08-04
-updated: 2026-08-05 09:09
+updated: 2026-08-05 09:24
 status: active
 workflow: WF-FEATURE (đa phase)
 priority: P1
@@ -77,7 +77,7 @@ Stack hiện tại: `server/src/` (Express, better-sqlite3, raw SQL), `client/sr
 
 | # | Bước | Agent | Status | Step file | Hoàn thành lúc |
 |---|------|-------|--------|-----------|-----------------|
-| 3.1 | DB Migration: `annotation_history`, `activity_log` (với `actor_id` FK), cột `version` vào `annotations` ⚠️ CTO/EM+security-audit | senior-developer + cto | ⬜ | `steps/STEP-3.1-db-migration-schema.md` | - |
+| 3.1 | DB Migration: `annotation_history`, `activity_log` (với `actor_id` FK), cột `version` vào `annotations` ⚠️ CTO/EM+security-audit | senior-developer + cto | ✅ | `steps/STEP-3.1-db-migration-schema.md` | 2026-08-05 09:24 |
 | 3.2 | Annotation history + audit trail (API + lưu snapshot trước/sau mỗi save + actor_id) | senior-developer | ⬜ | `steps/STEP-3.2-annotation-history.md` | - |
 | 3.3 | Activity log cấp project (upload/export/đổi split, timestamp, actor_id) | junior-developer | ⬜ | `steps/STEP-3.3-activity-log.md` | - |
 | 3.4 | Optimistic locking / conflict detection annotation (dựa trên cột `version`) | senior-developer | ⬜ | `steps/STEP-3.4-optimistic-locking.md` | - |
@@ -170,6 +170,7 @@ Không có hiện tại.
 | 2026-08-04 20:06 | Bước 2.1 ✅ Done — ADR-auth-labeling-studio.md (10 mục, 8 AD-A). Chốt JWT HS256 24h, bcrypt cost=12, middleware GLOBAL cả GET, role matrix chi tiết ~20 endpoint, seed admin trong migration, rate-limit 10/15p `POST /api/auth/login`, CORS siết theo env, secret env bắt buộc prod. Security-audit-stride: 0 Fail HIGH, 5 warning MED đã fold vào AD. CTO APPROVED kèm 2 điều kiện #A1 #A2 cho bước 2.2. EM APPROVED. DOCX xuất OK (PDF lỗi RPC docx2pdf, ⚠️ đã biết). | tech-lead + cto + em |
 | 2026-08-05 08:18 | Bước 2.2 ✅ Done — bảng `users` (INTEGER id, role, color), routes auth.js/users.js, middleware, LoginPage. Commit c58dd8c + 70d1f1e (npm audit fix brace-expansion High). Điều kiện CTO #A1 (test đủ ma trận AD-A5) + #A2 (npm audit sạch auth packages) đều đạt — 79→87 test pass. | senior-developer |
 | 2026-08-05 09:09 | Bước 2.3 ✅ Done — 4 cột review trên bảng `images`, routes/reviews.js (submit-review/approve/reject + role guard), Row 8 test (8 case) pass. Client: nút Gửi duyệt/Duyệt/Từ chối, filter + badge review. Commit 7775e9b. Test: 87 passed, 0 failed, 3 skipped. tsc --noEmit: 0 lỗi. **Phase 2 (Auth) HOÀN THÀNH.** | senior-developer |
+| 2026-08-05 09:24 | Bước 3.1 ✅ Done — cột `annotations.version` DEFAULT 0, bảng mới `annotation_history` (snapshot) + `activity_log`, auto-backup DB + verify row count trước/sau (CTO condition #1). Kết quả verify: 7 bảng, 0 mất dữ liệu (projects 2→2, classes 4→4, images 1→1, annotations/models/jobs 0→0, users 1→1). Test: 87 passed sau migration (không đổi). SNAPSHOT strategy theo ADR AD-5 (không diff). | senior-developer |
 
 ---
 **Status icons:** ⬜ Todo | 🔄 In Progress | ✅ Done | 🛑 Blocked | ⏭️ Skipped

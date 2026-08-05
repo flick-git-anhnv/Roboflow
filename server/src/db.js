@@ -11,7 +11,8 @@ export const MODEL_DIR = path.join(DATA_DIR, 'models');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 fs.mkdirSync(MODEL_DIR, { recursive: true });
 
-export const db = new Database(path.join(DATA_DIR, 'app.db'));
+export const DB_PATH = path.join(DATA_DIR, 'app.db');
+export const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
@@ -195,3 +196,154 @@ function m004_add_review_status() {
 }
 
 m004_add_review_status();
+
+// ─── m005_phase3_schema ────────────────────────────────────────────────────────
+// STEP-3.1: Schema cho Phase 3 (History & Activity Log).
+//   1. Cột `version INTEGER NOT NULL DEFAULT 0` trên `annotations` — optimistic
+//      locking (STEP-3.4). Existing rows nhận DEFAULT 0; mỗi save sẽ tăng lên 1+.
+//   2. Bảng `annotation_history` — SNAPSHOT toàn bộ annotations của 1 ảnh mỗi save
+//      (ADR AD-5: không diff, revert = 1 query). Retention 200 version/ảnh qua
+//      pruneAnnotationHistory() được gọi bởi STEP-3.2.
+//   3. Bảng `activity_log` — audit trail cấp project (route viết ở STEP-3.3).
+//
+// Idempotent: check PRAGMA table_info + sqlite_master trước ALTER/CREATE.
+// Backup: tạo app.db.bak-{YYYYMMDD-HHmmss} TRƯỚC khi chạy (chỉ khi cần migrate).
+// Verify: đếm row count trước/sau — DỪNG + throw nếu bảng nào bị mất dữ liệu
+//         (CTO condition #1 từ ADR APPROVED 2026-08-04).
+function m005_phase3_schema() {
+  // === Idempotent guard: nếu đã migrate rồi thì bỏ qua ===
+  const annotCols = db.prepare('PRAGMA table_info(annotations)').all().map((c) => c.name);
+  const existingTables = db
+    .prepare("SELECT name FROM sqlite_master WHERE type='table'")
+    .all()
+    .map((r) => r.name);
+  const hasVersion     = annotCols.includes('version');
+  const hasHistory     = existingTables.includes('annotation_history');
+  const hasActivityLog = existingTables.includes('activity_log');
+
+  if (hasVersion && hasHistory && hasActivityLog) return; // already migrated
+
+  // === Backup DB trước khi thay đổi schema ===
+  const now = new Date();
+  const p2  = (n) => String(n).padStart(2, '0');
+  const ts  = `${now.getFullYear()}${p2(now.getMonth() + 1)}${p2(now.getDate())}-${p2(now.getHours())}${p2(now.getMinutes())}${p2(now.getSeconds())}`;
+  const bakPath = `${DB_PATH}.bak-${ts}`;
+
+  // Checkpoint WAL → main file trước khi copy để bản backup nhất quán
+  try { db.pragma('wal_checkpoint(FULL)'); } catch (_) { /* ignore */ }
+  fs.copyFileSync(DB_PATH, bakPath);
+
+  // Giữ 5 backup gần nhất, xoá cũ hơn
+  try {
+    const bakFiles = fs
+      .readdirSync(DATA_DIR)
+      .filter((f) => f.startsWith('app.db.bak-'))
+      .sort()     // lexicographic = chronological (YYYYMMDD-HHmmss)
+      .reverse(); // newest first
+    for (const old of bakFiles.slice(5)) {
+      try { fs.unlinkSync(path.join(DATA_DIR, old)); } catch (_) { /* ignore */ }
+    }
+  } catch (_) { /* ignore if DATA_DIR unreadable */ }
+
+  console.log(`[INFO] m005: DB backed up → ${bakPath}`);
+
+  // === Row count TRƯỚC migration (CTO condition #1) ===
+  const TRACKED = ['projects', 'classes', 'images', 'annotations', 'models', 'jobs', 'users'];
+  const before = {};
+  for (const t of TRACKED) {
+    try { before[t] = db.prepare(`SELECT COUNT(*) AS n FROM "${t}"`).get().n; }
+    catch (_) { before[t] = null; } // bảng chưa tồn tại
+  }
+  console.log('[INFO] m005: Row counts BEFORE migration:', JSON.stringify(before));
+
+  // === Chạy migration trong transaction ===
+  db.transaction(() => {
+    // 1. Thêm cột version vào annotations (idempotent — guard phía trên)
+    if (!hasVersion) {
+      db.exec('ALTER TABLE annotations ADD COLUMN version INTEGER NOT NULL DEFAULT 0');
+    }
+
+    // 2. Bảng annotation_history — SNAPSHOT strategy (ADR AD-5)
+    //    actor_id nullable: các save trước khi auth được triển khai không có user
+    if (!hasHistory) {
+      db.exec(`
+        CREATE TABLE annotation_history (
+          id         INTEGER PRIMARY KEY AUTOINCREMENT,
+          image_id   TEXT    NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+          version    INTEGER NOT NULL,
+          snapshot   TEXT    NOT NULL,
+          actor_id   INTEGER REFERENCES users(id),
+          created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX idx_ann_history_image   ON annotation_history(image_id);
+        CREATE INDEX idx_ann_history_img_ver ON annotation_history(image_id, version DESC);
+      `);
+    }
+
+    // 3. Bảng activity_log — audit trail cấp project (route: STEP-3.3)
+    //    actor_id nullable: các event trước khi auth được triển khai
+    if (!hasActivityLog) {
+      db.exec(`
+        CREATE TABLE activity_log (
+          id         INTEGER PRIMARY KEY AUTOINCREMENT,
+          project_id TEXT    NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          actor_id   INTEGER REFERENCES users(id),
+          action     TEXT    NOT NULL,
+          detail     TEXT,
+          created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX idx_activity_log_project ON activity_log(project_id);
+        CREATE INDEX idx_activity_log_action  ON activity_log(action);
+      `);
+    }
+  })();
+
+  // === Row count SAU migration (CTO condition #1) ===
+  const after = {};
+  for (const t of TRACKED) {
+    try { after[t] = db.prepare(`SELECT COUNT(*) AS n FROM "${t}"`).get().n; }
+    catch (_) { after[t] = null; }
+  }
+  console.log('[INFO] m005: Row counts AFTER  migration:', JSON.stringify(after));
+
+  // === Verify: không bảng nào được mất dữ liệu ===
+  for (const t of TRACKED) {
+    if (before[t] === null) continue;          // bảng chưa tồn tại trước → skip
+    if (after[t] !== null && after[t] < before[t]) {
+      const msg =
+        `[CRITICAL] DATA LOSS in table "${t}": ${before[t]} rows → ${after[t]} rows. ` +
+        `Restore from backup: ${bakPath}`;
+      console.error(msg);
+      // Throw để ngăn server khởi động với dữ liệu bị mất (CTO requirement)
+      throw new Error(msg);
+    }
+  }
+
+  console.log('[INFO] m005: Migration complete — data integrity verified ✓');
+}
+
+m005_phase3_schema();
+
+// ─── Retention helper: annotation_history ─────────────────────────────────────
+// Gọi bởi STEP-3.2 (routes/history.js) ngay sau mỗi INSERT INTO annotation_history.
+// Giữ tối đa 200 version gần nhất mỗi ảnh (ADR AD-5 retention policy).
+export const HISTORY_MAX_VERSIONS = 200;
+
+export function pruneAnnotationHistory(imageId) {
+  const n = db
+    .prepare('SELECT COUNT(*) AS n FROM annotation_history WHERE image_id = ?')
+    .get(imageId)?.n ?? 0;
+
+  if (n > HISTORY_MAX_VERSIONS) {
+    db.prepare(`
+      DELETE FROM annotation_history
+      WHERE image_id = ?
+        AND id NOT IN (
+          SELECT id FROM annotation_history
+          WHERE image_id = ?
+          ORDER BY version DESC
+          LIMIT ?
+        )
+    `).run(imageId, imageId, HISTORY_MAX_VERSIONS);
+  }
+}

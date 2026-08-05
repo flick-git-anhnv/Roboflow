@@ -532,6 +532,55 @@ function m009_model_metadata() {
 
 m009_model_metadata();
 
+// ─── m010_work_assignment ──────────────────────────────────────────────────────
+// Gán khối lượng công việc (% ảnh) cho từng user trong project.
+//
+// images.assigned_to: user được gán xử lý ảnh này (NULL = chưa gán ai — mặc định,
+// tương thích ngược 100% với project không dùng tính năng này).
+// project_assignments: % MỤC TIÊU admin đặt cho từng user/project — lưu riêng
+// khỏi assigned_to vì % là "ý định" (có thể chưa khớp số ảnh thực tế đã gán khi
+// vừa đổi % hoặc vừa có ảnh mới upload), còn assigned_to là kết quả THỰC đã chia.
+function m010_work_assignment() {
+  const imageCols = db.prepare('PRAGMA table_info(images)').all().map((c) => c.name);
+  const needsAssignedTo = !imageCols.includes('assigned_to');
+  const hasAssignmentsTable = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='project_assignments'"
+  ).get();
+
+  if (!needsAssignedTo && hasAssignmentsTable) return; // already migrated
+
+  const before = db.prepare('SELECT COUNT(*) AS n FROM images').get().n;
+  console.log(`[INFO] m010: images row count BEFORE migration: ${before}`);
+
+  db.transaction(() => {
+    if (needsAssignedTo) {
+      db.exec('ALTER TABLE images ADD COLUMN assigned_to INTEGER REFERENCES users(id)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_images_assigned_to ON images(assigned_to)');
+    }
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS project_assignments (
+        project_id TEXT    NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        percent    REAL    NOT NULL DEFAULT 0,
+        updated_at TEXT    NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (project_id, user_id)
+      );
+    `);
+  })();
+
+  const after = db.prepare('SELECT COUNT(*) AS n FROM images').get().n;
+  console.log(`[INFO] m010: images row count AFTER  migration: ${after}`);
+
+  if (after < before) {
+    const msg = `[CRITICAL] DATA LOSS in images: ${before} rows → ${after} rows. Migration: m010_work_assignment`;
+    console.error(msg);
+    throw new Error(msg);
+  }
+  console.log('[INFO] m010: work assignment columns/table added ✓');
+}
+
+m010_work_assignment();
+
 // ─── Retention helper: annotation_history ─────────────────────────────────────
 // Gọi bởi STEP-3.2 (routes/history.js) ngay sau mỗi INSERT INTO annotation_history.
 // Giữ tối đa 200 version gần nhất mỗi ảnh (ADR AD-5 retention policy).

@@ -137,3 +137,27 @@ export interface AutoLabelJob {
   error: string | null;
   unmatchedClasses: string[];
 }
+
+/** Phân công % công việc trong 1 project — xem `assignments.js` (server). */
+export interface ProjectAssignment {
+  user_id: number;
+  username: string;
+  display_name: string;
+  role: UserRole;
+  color: string;
+  percent: number;
+  assigned_count: number;
+  done_count: number;
+}
+export interface ProjectAssignmentSummary {
+  assignments: ProjectAssignment[];
+  totalPercent: number;
+  images: { total: number; assigned: number; unassigned: number };
+}
+export interface AssignmentCandidate {
+  user_id: number;
+  username: string;
+  display_name: string;
+  role: UserRole;
+  color: string;
+}

@@ -7,6 +7,7 @@ import StatsPanel from '../components/StatsPanel';
 import ExportModal from '../components/ExportModal';
 import AutoLabelModal from '../components/AutoLabelModal';
 import ValidateModal from '../components/ValidateModal';
+import AssignmentModal from '../components/AssignmentModal';
 
 type StatusFilter = 'all' | 'labeled' | 'unlabeled';
 type SplitFilter = 'all' | Split;
@@ -37,6 +38,7 @@ export default function ProjectDetailPage() {
   const [statsOpen, setStatsOpen] = useState(false);
   const [autoLabelOpen, setAutoLabelOpen] = useState(false);
   const [validateOpen, setValidateOpen] = useState(false);
+  const [assignmentOpen, setAssignmentOpen] = useState(false);
   const [toast, setToast] = useState<{ text: string; error?: boolean } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -280,6 +282,7 @@ export default function ProjectDetailPage() {
           <button className="btn btn-outline" onClick={() => setStatsOpen(true)}>📊 Thống kê</button>
           <button className="btn btn-outline" onClick={() => setAutoLabelOpen(true)}>🤖 Auto Label</button>
           <button className="btn btn-outline" onClick={() => setValidateOpen(true)}>Kiểm tra dataset</button>
+          <button className="btn btn-outline" onClick={() => setAssignmentOpen(true)}>👥 Phân công</button>
           <button className="btn btn-secondary" onClick={() => setExportOpen(true)}>⬇ Export dataset</button>
           <button className="btn btn-outline" onClick={() => zipInputRef.current?.click()}>🗜 Tải file ZIP</button>
           <button className="btn btn-outline" onClick={() => folderInputRef.current?.click()}>📁 Tải thư mục</button>
@@ -749,6 +752,7 @@ export default function ProjectDetailPage() {
       {statsOpen && project && <StatsPanel projectId={project.id} onClose={() => setStatsOpen(false)} />}
       {exportOpen && project && <ExportModal projectId={project.id} onClose={() => setExportOpen(false)} />}
       {validateOpen && project && <ValidateModal projectId={project.id} onClose={() => setValidateOpen(false)} />}
+      {assignmentOpen && project && <AssignmentModal projectId={project.id} onClose={() => setAssignmentOpen(false)} />}
       {autoLabelOpen && project && (
         <AutoLabelModal
           projectId={project.id}

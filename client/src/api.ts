@@ -1,4 +1,4 @@
-import type { Annotation, AutoLabelJob, ClassLabel, ImageItem, ImageWithAnnotations, ModelInfo, Project, SuggestedBox, User, ValidateResult } from './types';
+import type { Annotation, AssignmentCandidate, AutoLabelJob, ClassLabel, ImageItem, ImageWithAnnotations, ModelInfo, Project, ProjectAssignmentSummary, SuggestedBox, User, ValidateResult } from './types';
 
 // ── Token helpers ──────────────────────────────────────────────────────────────
 // Token stored as httpOnly cookie (server-set) AND cached in sessionStorage for
@@ -236,6 +236,23 @@ export const api = {
     request<ImageItem>(`/api/images/${imageId}/approve`, { method: 'POST', body: JSON.stringify({}) }),
   rejectReview: (imageId: string, comment: string) =>
     request<ImageItem>(`/api/images/${imageId}/reject`, { method: 'POST', body: JSON.stringify({ comment }) }),
+
+  // ── Phân công % công việc ─────────────────────────────────────────────────────
+  getAssignments: (projectId: string) =>
+    request<ProjectAssignmentSummary>(`/api/projects/${projectId}/assignments`),
+  listAssignmentCandidates: (projectId: string) =>
+    request<AssignmentCandidate[]>(`/api/projects/${projectId}/assignments/candidates`),
+  saveAssignmentPercents: (projectId: string, assignments: { user_id: number; percent: number }[]) =>
+    request<{ ok: true }>(`/api/projects/${projectId}/assignments`, {
+      method: 'PUT',
+      body: JSON.stringify({ assignments }),
+    }),
+  distributeAssignments: (projectId: string) =>
+    request<{ ok: true; distributed: number; message?: string }>(`/api/projects/${projectId}/assignments/distribute`, {
+      method: 'POST',
+    }),
+  resetAssignments: (projectId: string) =>
+    request<{ ok: true; unassigned: number }>(`/api/projects/${projectId}/assignments/reset`, { method: 'POST' }),
 };
 
 export interface SplitOptions {

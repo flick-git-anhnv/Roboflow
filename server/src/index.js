@@ -24,6 +24,7 @@ import historyRouter from './routes/history.js';
 import activityRouter from './routes/activity.js';
 import prefillRouter from './routes/prefill.js';
 import validateRouter from './routes/validate.js';
+import assignmentsRouter from './routes/assignments.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -159,6 +160,7 @@ app.use('/api/images/:imageId', historyRouter);
 app.use('/api/projects/:projectId/activity', activityRouter);
 app.use('/api/projects/:projectId', prefillRouter);   // STEP-4.2: prefill + default-model
 app.use('/api/projects/:projectId', validateRouter);  // STEP-6.3: dataset validation
+app.use('/api/projects/:projectId/assignments', assignmentsRouter); // Phân công % công việc
 
 // ─── SPA fallback ─────────────────────────────────────────────────────────────
 const clientDist = path.join(__dirname, '..', '..', 'client', 'dist');

@@ -50,11 +50,29 @@ const zipUpload = multer({
 });
 
 router.get('/', (req, res) => {
+  const { projectId } = req.params;
+
+  // Phân công % công việc: nếu project ĐANG dùng tính năng gán việc (có ≥1 user
+  // percent > 0), annotator CHỈ thấy ảnh được gán cho chính mình — admin/reviewer
+  // luôn thấy toàn bộ (cần để duyệt/quản lý). Project chưa cấu hình phân công thì
+  // hành vi giữ nguyên như cũ (không lọc gì) — tương thích ngược 100%.
+  let assignmentFilter = '';
+  const params = [projectId];
+  if (req.user?.role === 'annotator') {
+    const usingAssignment = db.prepare(
+      'SELECT 1 FROM project_assignments WHERE project_id = ? AND percent > 0 LIMIT 1'
+    ).get(projectId);
+    if (usingAssignment) {
+      assignmentFilter = ' AND i.assigned_to = ?';
+      params.push(req.user.id);
+    }
+  }
+
   const images = db.prepare(`
     SELECT i.*,
       (SELECT GROUP_CONCAT(DISTINCT a.class_id) FROM annotations a WHERE a.image_id = i.id) AS class_ids_raw
-    FROM images i WHERE i.project_id = ? ORDER BY i.created_at ASC
-  `).all(req.params.projectId);
+    FROM images i WHERE i.project_id = ?${assignmentFilter} ORDER BY i.created_at ASC
+  `).all(...params);
   res.json(images.map((i) => ({
     ...i,
     class_ids_raw: undefined,

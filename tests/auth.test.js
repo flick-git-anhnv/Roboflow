@@ -1264,6 +1264,114 @@ async function runTests() {
     }
   }
 
+  // ── Row 25: Phân công % công việc ─────────────────────────────────────────
+  // PUT (admin only), GET (mọi role), POST /distribute (% tuyệt đối trên TỔNG
+  // ảnh — không phải % tương đối giữa các user có percent>0), POST /reset,
+  // và annotator chỉ thấy ảnh được gán cho mình khi project có cấu hình.
+  console.log('\n── Row 25: Phân công % công việc ──');
+  {
+    const a25ProjRes = await post('/api/projects', { name: 'assignment-test-project', description: '' }, adminToken);
+    ok('Row25 setup: tạo project assignment', a25ProjRes.status === 201, `got ${a25ProjRes.status}`);
+    const a25Proj = a25ProjRes.status === 201 ? await a25ProjRes.json() : null;
+    const A25_PID = a25Proj?.id;
+
+    if (!A25_PID) {
+      skip('Row25: tất cả tests', 'Không tạo được project');
+    } else {
+      // Upload 10 ảnh để có tổng số tròn, dễ tính %
+      let uploadedOk = true;
+      for (let i = 0; i < 10; i++) {
+        const r = await uploadImage(A25_PID, adminToken);
+        if (r.status !== 201) uploadedOk = false;
+      }
+      ok('Row25 setup: upload 10 ảnh', uploadedOk, `uploadedOk=${uploadedOk}`);
+
+      // 1. GET /assignments unauthenticated → 401
+      const getUnauth = await get(`/api/projects/${A25_PID}/assignments`, null);
+      ok('Row25: GET /assignments unauthenticated → 401', getUnauth.status === 401, `got ${getUnauth.status}`);
+
+      // 2. GET /assignments annotator → 200 (mọi role xem được)
+      const getAsAnnotator = await get(`/api/projects/${A25_PID}/assignments`, annotatorToken);
+      ok('Row25: GET /assignments annotator → 200', getAsAnnotator.status === 200, `got ${getAsAnnotator.status}`);
+
+      // 3. PUT /assignments annotator → 403 (chỉ admin đặt %)
+      const putAsAnnotator = await put(`/api/projects/${A25_PID}/assignments`,
+        { assignments: [{ user_id: annotatorId, percent: 50 }] }, annotatorToken);
+      ok('Row25: PUT /assignments annotator → 403', putAsAnnotator.status === 403, `got ${putAsAnnotator.status}`);
+
+      // 4. PUT /assignments admin, chỉ đặt annotator = 30% (test tuyệt đối trên tổng,
+      //    KHÔNG phải tương đối — đây là bug đã fix trong session này)
+      const putPercent = await put(`/api/projects/${A25_PID}/assignments`,
+        { assignments: [{ user_id: annotatorId, percent: 30 }] }, adminToken);
+      ok('Row25: PUT /assignments admin percent=30 → 200', putPercent.status === 200, `got ${putPercent.status}`);
+
+      // 5. POST /distribute → chỉ 3/10 ảnh được gán (30% của TỔNG, không phải 100%
+      //    dù đây là user DUY NHẤT có percent > 0)
+      const distributeRes = await post(`/api/projects/${A25_PID}/assignments/distribute`, {}, adminToken);
+      ok('Row25: POST /distribute → 200', distributeRes.status === 200, `got ${distributeRes.status}`);
+      if (distributeRes.status === 200) {
+        const distData = await distributeRes.json();
+        ok('Row25: distribute 30% của 10 ảnh → đúng 3 ảnh (% tuyệt đối, không tương đối)',
+          distData.distributed === 3, `distributed=${distData.distributed}`);
+      }
+
+      // 6. GET /assignments admin → assigned_count = 3, unassigned = 7
+      const summaryRes = await get(`/api/projects/${A25_PID}/assignments`, adminToken);
+      if (summaryRes.status === 200) {
+        const summary = await summaryRes.json();
+        const annRow = summary.assignments.find((r) => r.user_id === annotatorId);
+        ok('Row25: summary assigned_count = 3', annRow?.assigned_count === 3, `assigned_count=${annRow?.assigned_count}`);
+        ok('Row25: summary images.unassigned = 7', summary.images.unassigned === 7, `unassigned=${summary.images.unassigned}`);
+      }
+
+      // 7. Annotator chỉ thấy 3 ảnh được gán cho mình (không thấy 7 ảnh còn lại)
+      const annImages = await get(`/api/projects/${A25_PID}/images`, annotatorToken);
+      if (annImages.status === 200) {
+        const imgs = await annImages.json();
+        ok('Row25: annotator chỉ thấy 3 ảnh được gán cho mình',
+          imgs.length === 3 && imgs.every((i) => i.assigned_to === annotatorId),
+          `length=${imgs.length}, assigned_to=${JSON.stringify(imgs.map((i) => i.assigned_to))}`);
+      }
+
+      // 8. Admin vẫn thấy đủ 10 ảnh (không bị lọc)
+      const adminImages = await get(`/api/projects/${A25_PID}/images`, adminToken);
+      if (adminImages.status === 200) {
+        const imgs = await adminImages.json();
+        ok('Row25: admin thấy đủ 10 ảnh (không bị lọc theo assignment)', imgs.length === 10, `length=${imgs.length}`);
+      }
+
+      // 9. POST /distribute lần 2 (không còn ảnh cần top-up thêm cho annotator) → distributed=0
+      const distributeAgain = await post(`/api/projects/${A25_PID}/assignments/distribute`, {}, adminToken);
+      if (distributeAgain.status === 200) {
+        const d2 = await distributeAgain.json();
+        ok('Row25: distribute lần 2 không top-up thêm (đã đạt target) → distributed=0',
+          d2.distributed === 0, `distributed=${d2.distributed}`);
+      }
+
+      // 10. POST /reset annotator → 403 (chỉ admin)
+      const resetAsAnnotator = await post(`/api/projects/${A25_PID}/assignments/reset`, {}, annotatorToken);
+      ok('Row25: POST /reset annotator → 403', resetAsAnnotator.status === 403, `got ${resetAsAnnotator.status}`);
+
+      // 11. POST /reset admin → gỡ hết 3 ảnh đã gán
+      const resetRes = await post(`/api/projects/${A25_PID}/assignments/reset`, {}, adminToken);
+      ok('Row25: POST /reset admin → 200', resetRes.status === 200, `got ${resetRes.status}`);
+      if (resetRes.status === 200) {
+        const resetData = await resetRes.json();
+        ok('Row25: reset gỡ đúng 3 ảnh đã gán', resetData.unassigned === 3, `unassigned=${resetData.unassigned}`);
+      }
+
+      // 12. Sau reset, annotator lại thấy 0 ảnh (project vẫn có cấu hình % nhưng chưa gán lại)
+      const annImagesAfterReset = await get(`/api/projects/${A25_PID}/images`, annotatorToken);
+      if (annImagesAfterReset.status === 200) {
+        const imgs = await annImagesAfterReset.json();
+        ok('Row25: sau reset annotator thấy 0 ảnh (chưa gán lại)', imgs.length === 0, `length=${imgs.length}`);
+      }
+
+      // Cleanup
+      await del(`/api/projects/${A25_PID}`, adminToken);
+    }
+  }
+
   // ── Rate limit test ───────────────────────────────────────────────────────
   console.log('\n── Rate limit (10 fail/15min → 429) ──');
   let hit429 = false;

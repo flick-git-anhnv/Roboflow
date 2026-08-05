@@ -76,7 +76,7 @@ Implement review workflow: ảnh có trạng thái `review_status` (`draft` → 
 
 ## Commit
 
-- Hash: [điền sau khi commit ngay bên dưới]
+- Hash: 7775e9b
 - Đã push: có
 
 ---

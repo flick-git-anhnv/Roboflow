@@ -1,7 +1,7 @@
 ---
 task: labeling-studio-improve
 created: 2026-08-04
-updated: 2026-08-05 08:18
+updated: 2026-08-05 09:09
 status: active
 workflow: WF-FEATURE (đa phase)
 priority: P1
@@ -67,7 +67,7 @@ Stack hiện tại: `server/src/` (Express, better-sqlite3, raw SQL), `client/sr
 |---|------|-------|--------|-----------|-----------------|
 | 2.1 | Auth design + ADR + security-audit-stride ⚠️ CTO/EM approve bắt buộc trước 2.2 | tech-lead → cto | ✅ | `steps/STEP-2.1-auth-design-security-audit.md` | 2026-08-04 20:06 |
 | 2.2 | Auth implementation (JWT/session, bảng `users`, middleware) ⚠️ security-audit-stride trước merge | senior-developer | ✅ | `steps/STEP-2.2-auth-implementation.md` | 2026-08-05 08:18 |
-| 2.3 | Review workflow: role annotator vs reviewer, trạng thái ảnh (draft/in-review/approved) ⚠️ security-audit-stride trước merge | senior-developer | ⬜ | `steps/STEP-2.3-review-workflow.md` | - |
+| 2.3 | Review workflow: role annotator vs reviewer, trạng thái ảnh (draft/in-review/approved) ⚠️ security-audit-stride trước merge | senior-developer | ✅ | `steps/STEP-2.3-review-workflow.md` | 2026-08-05 09:09 |
 
 ---
 
@@ -128,7 +128,7 @@ Stack hiện tại: `server/src/` (Express, better-sqlite3, raw SQL), `client/sr
 - [ ] `docs/tech-design/TDD-labeling-studio-improve.md` + ADR (Phase 0)
 - [ ] `docs/architecture/ADR-auth-labeling-studio.md` (Phase 2.1)
 - [ ] `server/src/routes/auth.js` + middleware (Phase 2.2)
-- [ ] `server/src/routes/review.js` (Phase 2.3)
+- [x] `server/src/routes/reviews.js` (Phase 2.3 — hoàn thành, đổi tên số nhiều so với kế hoạch ban đầu)
 - [ ] `server/src/python/inference_service.py` — FastAPI service (Phase 1.1)
 - [ ] `server/src/routes/autolabel.js` — refactor gọi HTTP (Phase 1.1)
 - [ ] `server/src/routes/jobs.js` + migration SQL (Phase 1.2)
@@ -168,6 +168,8 @@ Không có hiện tại.
 | 2026-08-04 16:53 | Bước 1.2 ✅ Done — bảng jobs SQLite (12 cột, 2 indexes, startup cleanup), routes/jobs.js CRUD, autolabel DB-backed job tracking. Commit c6aebaf. Tested: schema verify, restart→error, /api/jobs endpoints. | senior-developer |
 | 2026-08-04 17:04 | Bước 1.3 ✅ Done — thumbnail service lazy on-demand (sharp, cache server/data/thumbnails/), API list images trả thumbnail_url, client grid dùng thumbnail. Commit 8214474. Tested: 800×600 PNG (104KB) → thumb 3.1KB, cache, custom size, 404 image không tồn tại. **Phase 1 HOÀN THÀNH.** | junior-developer |
 | 2026-08-04 20:06 | Bước 2.1 ✅ Done — ADR-auth-labeling-studio.md (10 mục, 8 AD-A). Chốt JWT HS256 24h, bcrypt cost=12, middleware GLOBAL cả GET, role matrix chi tiết ~20 endpoint, seed admin trong migration, rate-limit 10/15p `POST /api/auth/login`, CORS siết theo env, secret env bắt buộc prod. Security-audit-stride: 0 Fail HIGH, 5 warning MED đã fold vào AD. CTO APPROVED kèm 2 điều kiện #A1 #A2 cho bước 2.2. EM APPROVED. DOCX xuất OK (PDF lỗi RPC docx2pdf, ⚠️ đã biết). | tech-lead + cto + em |
+| 2026-08-05 08:18 | Bước 2.2 ✅ Done — bảng `users` (INTEGER id, role, color), routes auth.js/users.js, middleware, LoginPage. Commit c58dd8c + 70d1f1e (npm audit fix brace-expansion High). Điều kiện CTO #A1 (test đủ ma trận AD-A5) + #A2 (npm audit sạch auth packages) đều đạt — 79→87 test pass. | senior-developer |
+| 2026-08-05 09:09 | Bước 2.3 ✅ Done — 4 cột review trên bảng `images`, routes/reviews.js (submit-review/approve/reject + role guard), Row 8 test (8 case) pass. Client: nút Gửi duyệt/Duyệt/Từ chối, filter + badge review. Commit 7775e9b. Test: 87 passed, 0 failed, 3 skipped. tsc --noEmit: 0 lỗi. **Phase 2 (Auth) HOÀN THÀNH.** | senior-developer |
 
 ---
 **Status icons:** ⬜ Todo | 🔄 In Progress | ✅ Done | 🛑 Blocked | ⏭️ Skipped

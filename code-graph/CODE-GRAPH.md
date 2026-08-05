@@ -3,7 +3,7 @@
 > Tài liệu bản đồ codebase. Mọi coding agent PHẢI đọc file này TRƯỚC khi mở source.
 > Cập nhật ngay sau mỗi PR merge có thay đổi cấu trúc/API/schema.
 >
-> Last verified: 2026-08-05 | Cập nhật: senior-developer (STEP-3.2)
+> Last verified: 2026-08-05 | Cập nhật: junior-developer (STEP-3.3)
 
 ---
 
@@ -101,7 +101,8 @@ Roboflow - Copy/
 │   │   │   ├── thumbnails.js       ← thumbnail cache service (STEP-1.3 MỚI)
 │   │   │   ├── annotations.js      ← STEP-3.2: ghi snapshot vào annotation_history sau mỗi save
 │   │   │   ├── history.js          ← STEP-3.2 MỚI: GET /history + POST /history/:v/revert
-│   │   │   ├── export.js           ← archiver (yolo/coco/voc)
+│   │   │   ├── activity.js         ← STEP-3.3 MỚI: GET /activity (project activity log)
+│   │   │   ├── export.js           ← archiver (yolo/coco/voc); STEP-3.3: gọi logActivity
 │   │   │   ├── stats.js
 │   │   │   ├── models.js
 │   │   │   ├── autolabel.js        ← HTTP → FastAPI (STEP-1.1); DB-backed jobs (STEP-1.2)
@@ -160,8 +161,9 @@ Roboflow - Copy/
 | **[STEP-1.2]** Jobs router | import + mount `routes/jobs.js` tại `/api/jobs` | CONFIRMED |
 | **[STEP-1.3]** Thumbnails router | import + mount `routes/thumbnails.js` tại `/api/images` | CONFIRMED |
 | **[STEP-3.2]** History router | import + mount `routes/history.js` tại `/api/images/:imageId` | CONFIRMED |
+| **[STEP-3.3]** Activity router | import + mount `routes/activity.js` tại `/api/projects/:projectId/activity` | CONFIRMED |
 | Env vars đọc | `PORT`, `PYTHON_BIN`, `INFERENCE_PORT`, `USE_LEGACY_INFER` | CONFIRMED |
-| Last verified | 2026-08-05 (STEP-3.2) | - |
+| Last verified | 2026-08-05 (STEP-3.3) | - |
 
 **Route mounting:**
 ```
@@ -177,6 +179,7 @@ Roboflow - Copy/
 /api/images                           → routes/thumbnails.js  [STEP-1.3 MỚI]
 /api/images/:imageId                  → routes/reviews.js     [STEP-2.3 MỚI]
 /api/images/:imageId                  → routes/history.js     [STEP-3.2 MỚI]
+/api/projects/:projectId/activity     → routes/activity.js    [STEP-3.3 MỚI]
 ```
 
 ---
@@ -186,8 +189,8 @@ Roboflow - Copy/
 | Thuộc tính | Giá trị | Confidence |
 |---|---|---|
 | Loại | Singleton DB module (ESM export) | CONFIRMED |
-| Exports | `db` (Database instance), `DATA_DIR`, `UPLOAD_DIR`, `MODEL_DIR` | CONFIRMED |
-| Callers/Used-by | index.js (UPLOAD_DIR), projects.js, classes.js, images.js, annotations.js, export.js, stats.js, models.js, autolabel.js, jobs.js | CONFIRMED |
+| Exports | `db`, `DATA_DIR`, `UPLOAD_DIR`, `MODEL_DIR`, `DB_PATH`, `HISTORY_MAX_VERSIONS`, `pruneAnnotationHistory()`, `logActivity()` | CONFIRMED |
+| Callers/Used-by | index.js (UPLOAD_DIR), projects.js, classes.js, images.js, annotations.js, export.js, stats.js, models.js, autolabel.js, jobs.js, history.js, activity.js | CONFIRMED |
 | DB engine | better-sqlite3, WAL mode, foreign_keys=ON | CONFIRMED |
 | Schema init | `CREATE TABLE IF NOT EXISTS` — idempotent | CONFIRMED |
 | Migrations inline | `PRAGMA table_info` + `ALTER TABLE` cho cột thiếu | CONFIRMED |
@@ -402,6 +405,29 @@ Roboflow - Copy/
 **Response POST revert:** `{reverted_to_version: N, annotations: Annotation[]}`.
 **Role guard (AD-A5 Row 7):** annotator → 403. Annotator được xem history (GET) nhưng không được revert.
 **Watch out:** Sau revert, 1 history entry mới được tạo (version tăng tiếp) — audit trail liên tục, không bị gián đoạn.
+
+---
+
+### 3.15 `server/src/routes/activity.js` — Activity Log (STEP-3.3 MỚI)
+
+| Thuộc tính | Giá trị | Confidence |
+|---|---|---|
+| Router options | Router({ mergeParams: true }) | CONFIRMED |
+| Imports | db (db.js) | CONFIRMED |
+| Callers/Used-by | index.js (mounted `/api/projects/:projectId/activity`) | CONFIRMED |
+| Last verified | 2026-08-05 (STEP-3.3) | - |
+
+| Method | Path | Role required | Mô tả |
+|---|---|---|---|
+| GET | `/` | any authenticated | List activity log của project. LEFT JOIN users để lấy actor_name/actor_color. Phân trang: limit (mặc định 50, max 100) + offset. `detail` field trả về dưới dạng object (JSON.parse). |
+
+**Response shape:** `[{id, project_id, actor_id, action, detail: object|null, created_at, actor_name, actor_color}]` — ORDER BY created_at DESC.
+
+**Actions được ghi (bởi routes khác):**
+- `image_upload` — images.js (upload single + zip) → `{count, names, source?}`
+- `image_delete` — images.js (DELETE) → `{image_id, filename}`
+- `split_change` — images.js (PATCH) → `{image_id, from, to}`
+- `export` — export.js → `{format, count}`
 
 ---
 
@@ -925,7 +951,19 @@ Query params export: `format=yolo\|coco\|voc`, `splitMode=manual\|auto`, `trainR
 **Depth-1 callers của annotations.js:** không thay đổi interface PUT (input/output giống trước), chỉ thêm side-effect ghi history.
 **Depth-1 của history.js:** index.js (mount) — client chưa gọi (frontend history panel là việc của phase UI sau).
 
-**Watch out cho STEP-3.3 và 3.4:** Cả 2 bước cần sửa `annotations.js` PUT handler — 3.3 thêm `activity_log` INSERT vào transaction hiện có, 3.4 thêm `req.body.version` conflict check. Không có xung đột nếu làm tuần tự. History.js cũng có thể được cập nhật ở STEP-3.3 để ghi log khi revert.
+**Watch out cho STEP-3.4:** Cần sửa `annotations.js` PUT handler — thêm `req.body.version` conflict check. STEP-3.3 KHÔNG sửa annotations.js (chỉ sửa images.js/export.js). Không xung đột.
+
+### Phase 3.3 — Activity log cấp project — ✅ HOÀN THÀNH
+
+**Files đã thay đổi (STEP-3.3):**
+- `server/src/db.js` — thêm export `logActivity(projectId, actorId, action, detail)`: INSERT non-blocking vào `activity_log`.
+- `server/src/routes/activity.js` — **MỚI**: `GET /api/projects/:projectId/activity` (phân trang, LEFT JOIN users, detail dưới dạng object).
+- `server/src/routes/images.js` — gọi `logActivity` sau: upload (single + zip) → `image_upload`, PATCH khi split đổi → `split_change`, DELETE → `image_delete`.
+- `server/src/routes/export.js` — gọi `logActivity` trước `archive.finalize()` → `export`.
+- `server/src/index.js` — mount `activityRouter` tại `/api/projects/:projectId/activity`.
+- `tests/auth.test.js` — Row 17: verify image_upload/split_change/image_delete log + all roles 200 + unauth 401.
+
+**Kết quả test:** 101 passed, 0 failed, 0 skipped. Commit: a0f01dc.
 
 ---
 
@@ -976,3 +1014,4 @@ Query params export: `format=yolo\|coco\|voc`, `splitMode=manual\|auto`, `trainR
 | 2026-08-04 | senior-developer (STEP-2.3) | Thêm §3.13 reviews.js (MỚI), cập nhật §6 bảng `images` (4 cột review), §9 Phase 2.3 DONE — review workflow submit/approve/reject, Row 8 test pass | (STEP-2.3) |
 | 2026-08-05 | senior-developer (STEP-3.1) | Cập nhật §6 — cột `annotations.version`, bảng mới `annotation_history` (snapshot), `activity_log`; §9 Phase 3.1 DONE — verify row count trước/sau (0 mất dữ liệu, CTO condition #1 đạt) | (STEP-3.1) |
 | 2026-08-05 | senior-developer (STEP-3.2) | Thêm §3.14 history.js (MỚI), cập nhật §2 (routes/history.js), §3.1 (mount /api/images/:id history), §3.6 (annotations.js + pruneAnnotationHistory), §7 (Annotation History endpoints), §9 Phase 3.2 DONE — 93 test pass (0 fail, 0 skip) | a4c3519 |
+| 2026-08-05 | junior-developer (STEP-3.3) | Thêm §3.15 activity.js (MỚI), cập nhật §2 (routes/activity.js), §3.1 (mount /api/projects/:id/activity + activityRouter), §3.2 (db.js exports: logActivity), §3.9 (images.js gọi logActivity), §3.10 (export.js gọi logActivity), §9 Phase 3.3 DONE — 101 test pass (0 fail, 0 skip) | a0f01dc |

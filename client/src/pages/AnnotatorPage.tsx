@@ -114,6 +114,8 @@ export default function AnnotatorPage() {
   /** Box đã copy (Ctrl+C) — lưu ref vì không cần trigger render riêng, chỉ cần hasClipboard để enable nút Dán. */
   const clipboardBoxRef = useRef<Box | null>(null);
   const [hasClipboard, setHasClipboard] = useState(false);
+  /** Vị trí con trỏ chuột hiện tại (toạ độ ảnh) — cập nhật liên tục trong onMouseMove, dùng để Ctrl+V dán đúng vị trí chuột. */
+  const lastMousePosRef = useRef<Point | null>(null);
 
   /** Keep boxesRef in sync with boxes state (runs after each render). */
   useEffect(() => { boxesRef.current = boxes; }, [boxes]);
@@ -748,13 +750,38 @@ export default function AnnotatorPage() {
     attachWindowDragListeners();
   };
 
+  /** Map handle resize → cursor CSS chuẩn (mũi tên chỉ đúng hướng kéo). */
+  const HANDLE_CURSOR: Record<string, string> = { nw: 'nwse-resize', se: 'nwse-resize', ne: 'nesw-resize', sw: 'nesw-resize' };
+
   const onMouseMove = (e: React.MouseEvent) => {
+    // Luôn lưu vị trí con trỏ (toạ độ ảnh) vào ref — dùng cho Ctrl+V dán tại
+    // đúng vị trí chuột. Ref, không state, để không re-render mỗi lần rê chuột.
+    const pos = toImageCoords(e.clientX, e.clientY);
+    lastMousePosRef.current = pos;
     // While actively dragging, window-level listeners (attached on mousedown)
     // handle movement so it keeps working outside the canvas bounds.
     if (dragRef.current.mode !== 'none') return;
-    const { x, y } = toImageCoords(e.clientX, e.clientY);
     if (drawingPoints.length > 0 && drawingPoints.length < 4) {
-      setMousePos({ x, y });
+      setMousePos(pos);
+    }
+
+    // Đổi cursor động theo vị trí chuột — set trực tiếp qua ref (không qua
+    // state) để tránh re-render mỗi lần rê chuột. Không đổi khi đang pan
+    // (Space giữ hoặc đang kéo chuột giữa) — để CSS .pan-ready/.panning tự lo.
+    if (!spaceHeld && !isPanning && canvasRef.current) {
+      let cursor = 'crosshair';
+      const sel = selectedId ? boxes.find((b) => b.id === selectedId) : null;
+      if (sel) {
+        const handle = hitTestHandle(sel, pos.x, pos.y);
+        if (handle !== null) {
+          cursor = typeof handle === 'number' ? 'pointer' : (HANDLE_CURSOR[handle] || 'pointer');
+        } else if (hitTestBox(pos.x, pos.y)) {
+          cursor = 'move';
+        }
+      } else if (hitTestBox(pos.x, pos.y)) {
+        cursor = 'move';
+      }
+      canvasRef.current.style.cursor = cursor;
     }
   };
 
@@ -844,8 +871,16 @@ export default function AnnotatorPage() {
       preDragSnapshotRef.current = null;
       lastDrawnSizeRef.current = null;
     } else if (drag.mode === 'move' || drag.mode === 'resize') {
-      // STEP-5.1: Push pre-drag snapshot for move/resize operations
-      if (preDragSnapshotRef.current) {
+      // BUGFIX: chỉ push undo nếu box THỰC SỰ thay đổi vị trí/kích thước.
+      // Trước đây push vô điều kiện mỗi lần mousedown+mouseup trên box đã có
+      // (kể cả chỉ CLICK CHỌN, không kéo đi đâu cả) — mỗi lần click-chọn lại
+      // tạo 1 snapshot "rỗng" (giống hệt trạng thái hiện tại) chiếm 1 slot
+      // undo. Kết quả: Ctrl+Z phải bấm nhiều lần mới thấy đổi gì (phải đi
+      // qua hết các snapshot rỗng đó trước khi tới thao tác THẬT gần nhất) —
+      // đúng cảm giác "lúc được lúc không".
+      const changed = preDragSnapshotRef.current
+        && JSON.stringify(preDragSnapshotRef.current) !== JSON.stringify(boxesRef.current);
+      if (changed && preDragSnapshotRef.current) {
         undoStackRef.current.push(preDragSnapshotRef.current);
         if (undoStackRef.current.length > MAX_UNDO) undoStackRef.current.shift();
         redoStackRef.current = [];
@@ -853,7 +888,7 @@ export default function AnnotatorPage() {
         setRedoSize(0);
       }
       preDragSnapshotRef.current = null;
-      setBoxes((prev) => { scheduleSave(prev); return prev; });
+      if (changed) setBoxes((prev) => { scheduleSave(prev); return prev; });
     }
     dragRef.current = { mode: 'none', handle: null, startX: 0, startY: 0 };
   };
@@ -875,24 +910,31 @@ export default function AnnotatorPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId]);
 
-  /** Dán box đã copy (Ctrl+V) — tạo bản sao mới, lệch nhẹ để không đè hẳn lên box gốc, rồi chọn nó luôn. */
+  /** Dán box đã copy (Ctrl+V) — đặt tâm bản sao mới tại đúng vị trí con trỏ chuột
+   * hiện tại (nếu chuột đang ở trong canvas); nếu không xác định được vị trí
+   * chuột (VD bấm nút toolbar mà chuột chưa từng vào canvas) → lệch nhẹ 16px
+   * từ vị trí gốc để không đè hẳn lên box cũ. */
   const pasteBox = useCallback(() => {
     const src = clipboardBoxRef.current;
     if (!src || !image) return;
     const OFFSET = 16;
+    const srcCenterX = src.x + src.w / 2, srcCenterY = src.y + src.h / 2;
+    const cursor = lastMousePosRef.current;
+    const dx = cursor ? cursor.x - srcCenterX : OFFSET;
+    const dy = cursor ? cursor.y - srcCenterY : OFFSET;
     const maxX = Math.max(0, image.width - src.w);
     const maxY = Math.max(0, image.height - src.h);
     const newId = `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const pasted: Box = {
       ...cloneBox(src),
       id: newId,
-      x: clamp(src.x + OFFSET, 0, maxX),
-      y: clamp(src.y + OFFSET, 0, maxY),
+      x: clamp(src.x + dx, 0, maxX),
+      y: clamp(src.y + dy, 0, maxY),
     };
     if (pasted.type === 'quad' && pasted.points) {
       pasted.points = pasted.points.map((p) => ({
-        x: clamp(p.x + OFFSET, 0, image.width),
-        y: clamp(p.y + OFFSET, 0, image.height),
+        x: clamp(p.x + dx, 0, image.width),
+        y: clamp(p.y + dy, 0, image.height),
       })) as [Point, Point, Point, Point];
     }
     pushHistorySnapshot();

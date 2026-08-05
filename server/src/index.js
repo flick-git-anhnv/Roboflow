@@ -104,10 +104,21 @@ app.use(helmet({
 const CORS_ORIGIN = (process.env.CORS_ORIGIN || 'http://localhost:5173')
   .split(',').map((s) => s.trim()).filter(Boolean);
 
+// Truy cập từ máy khác trong mạng LAN (VD http://192.168.1.20:5173) khi ở dev
+// mode: cho phép origin có IP thuộc dải mạng riêng (RFC 1918), giữ nguyên
+// PORT client (mặc định 5173, override qua CLIENT_PORT nếu đổi). KHÔNG áp
+// dụng khi NODE_ENV=production — production luôn chỉ theo đúng CORS_ORIGIN.
+const IS_PROD = process.env.NODE_ENV === 'production';
+const CLIENT_PORT = process.env.CLIENT_PORT || '5173';
+const LAN_ORIGIN_RE = new RegExp(
+  `^https?://(192\\.168\\.\\d{1,3}\\.\\d{1,3}|10\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}|172\\.(1[6-9]|2\\d|3[01])\\.\\d{1,3}\\.\\d{1,3}):${CLIENT_PORT}$`
+);
+
 app.use(cors({
   origin: (origin, cb) => {
     if (!origin) return cb(null, true); // curl/Postman không có Origin header
     if (CORS_ORIGIN.includes(origin)) return cb(null, true);
+    if (!IS_PROD && LAN_ORIGIN_RE.test(origin)) return cb(null, true);
     return cb(new Error('CORS blocked: ' + origin));
   },
   credentials: true,

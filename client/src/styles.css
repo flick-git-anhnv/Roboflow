@@ -376,6 +376,62 @@ a { color: inherit; text-decoration: none; }
 .filter-search:focus, .filter-bar select:focus { outline: none; border-color: var(--orange); }
 .filter-count { font-size: 12.5px; color: #888; margin-left: auto; }
 
+/* Dropdown filter chọn NHIỀU nhãn (checkbox list) — thay cho <select> đơn trước đây. */
+.multiselect { position: relative; }
+.multiselect-trigger {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 8px 10px;
+  font-size: 13px;
+  background: var(--white);
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.multiselect-trigger:hover { background: var(--bg); }
+.multiselect-caret { font-size: 10px; color: #888; }
+.multiselect-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(37,28,83,0.14);
+  padding: 6px;
+  min-width: 200px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.multiselect-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.multiselect-row:hover { background: var(--bg); }
+.multiselect-row input[type=checkbox] { flex-shrink: 0; }
+.multiselect-clear {
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px 8px;
+  border: none;
+  border-top: 1px solid var(--border);
+  background: none;
+  color: var(--orange);
+  font-size: 12.5px;
+  cursor: pointer;
+  border-radius: 0 0 6px 6px;
+}
+.multiselect-clear:hover { background: var(--bg); }
+
 .class-dots {
   position: absolute;
   bottom: 6px;

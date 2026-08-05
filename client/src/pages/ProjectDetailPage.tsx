@@ -44,7 +44,11 @@ export default function ProjectDetailPage() {
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
-  const [classFilter, setClassFilter] = useState<string>('all');
+  // Filter nhãn: cho phép chọn NHIỀU nhãn cùng lúc (OR — ảnh khớp nếu có ÍT NHẤT 1
+  // nhãn trong danh sách chọn). Mảng rỗng = "Tất cả nhãn" (không lọc).
+  const [classFilter, setClassFilter] = useState<string[]>([]);
+  const [classFilterOpen, setClassFilterOpen] = useState(false);
+  const classFilterRef = useRef<HTMLDivElement>(null);
   const [splitFilter, setSplitFilter] = useState<SplitFilter>('all');
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>('all');
   const [doneFilter, setDoneFilter] = useState<DoneFilter>('all');
@@ -128,8 +132,24 @@ export default function ProjectDetailPage() {
     if (!confirm(`Xoá nhãn "${cls.name}"? Các annotation dùng nhãn này cũng sẽ bị xoá.`)) return;
     await api.deleteClass(projectId, cls.id);
     setClasses((cs) => cs.filter((c) => c.id !== cls.id));
-    if (classFilter === cls.id) setClassFilter('all');
+    setClassFilter((prev) => prev.filter((id) => id !== cls.id));
   };
+
+  const toggleClassFilter = (classId: string) => {
+    setClassFilter((prev) => (prev.includes(classId) ? prev.filter((id) => id !== classId) : [...prev, classId]));
+  };
+
+  // Đóng dropdown filter nhãn khi click ra ngoài.
+  useEffect(() => {
+    if (!classFilterOpen) return;
+    const onClickOutside = (e: MouseEvent) => {
+      if (classFilterRef.current && !classFilterRef.current.contains(e.target as Node)) {
+        setClassFilterOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, [classFilterOpen]);
 
   const removeImage = async (img: ImageItem, e: React.MouseEvent) => {
     e.preventDefault();
@@ -197,7 +217,8 @@ export default function ProjectDetailPage() {
     return images.filter((img) => {
       if (statusFilter !== 'all' && img.status !== statusFilter) return false;
       if (splitFilter !== 'all' && img.split !== splitFilter) return false;
-      if (classFilter !== 'all' && !(img.class_ids || []).includes(classFilter)) return false;
+      // Nhiều nhãn: ảnh khớp nếu có ÍT NHẤT 1 trong các nhãn đã chọn (OR).
+      if (classFilter.length > 0 && !(img.class_ids || []).some((id) => classFilter.includes(id))) return false;
       if (reviewFilter !== 'all' && (img.review_status || 'draft') !== reviewFilter) return false;
       // STEP-3.5: lọc theo done status
       if (doneFilter === 'done' && !img.completed_at) return false;
@@ -210,13 +231,13 @@ export default function ProjectDetailPage() {
   const resetFilters = () => {
     setSearch('');
     setStatusFilter('all');
-    setClassFilter('all');
+    setClassFilter([]);
     setSplitFilter('all');
     setReviewFilter('all');
     setDoneFilter('all');
   };
 
-  const hasActiveFilters = search || statusFilter !== 'all' || classFilter !== 'all' || splitFilter !== 'all' || reviewFilter !== 'all' || doneFilter !== 'all';
+  const hasActiveFilters = search || statusFilter !== 'all' || classFilter.length > 0 || splitFilter !== 'all' || reviewFilter !== 'all' || doneFilter !== 'all';
 
   // Quay về trang 1 mỗi khi bộ lọc hoặc kích thước trang thay đổi
   useEffect(() => { setPage(1); }, [search, statusFilter, classFilter, splitFilter, reviewFilter, doneFilter, pageSize]);
@@ -515,10 +536,26 @@ export default function ProjectDetailPage() {
               <option value="unlabeled">Chưa gán nhãn</option>
               <option value="labeled">Đã gán nhãn</option>
             </select>
-            <select value={classFilter} onChange={(e) => setClassFilter(e.target.value)}>
-              <option value="all">Tất cả nhãn</option>
-              {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+            <div className="multiselect" ref={classFilterRef}>
+              <button type="button" className="multiselect-trigger" onClick={() => setClassFilterOpen((v) => !v)}>
+                {classFilter.length === 0 ? 'Tất cả nhãn' : `${classFilter.length} nhãn đã chọn`} <span className="multiselect-caret">▾</span>
+              </button>
+              {classFilterOpen && (
+                <div className="multiselect-panel">
+                  {classes.length === 0 && <p style={{ fontSize: 12.5, color: '#888', margin: '4px 8px' }}>Chưa có nhãn nào.</p>}
+                  {classes.map((c) => (
+                    <label key={c.id} className="multiselect-row">
+                      <input type="checkbox" checked={classFilter.includes(c.id)} onChange={() => toggleClassFilter(c.id)} />
+                      <span className="class-swatch" style={{ background: c.color }} />
+                      {c.name}
+                    </label>
+                  ))}
+                  {classFilter.length > 0 && (
+                    <button type="button" className="multiselect-clear" onClick={() => setClassFilter([])}>Bỏ chọn tất cả</button>
+                  )}
+                </div>
+              )}
+            </div>
             <select value={splitFilter} onChange={(e) => setSplitFilter(e.target.value as SplitFilter)}>
               <option value="all">Tất cả tập</option>
               <option value="train">train</option>

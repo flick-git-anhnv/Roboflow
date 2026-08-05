@@ -1,7 +1,7 @@
 ---
 task: labeling-studio-improve
 created: 2026-08-04
-updated: 2026-08-05 10:00
+updated: 2026-08-05 03:20
 status: active
 workflow: WF-FEATURE (đa phase)
 priority: P1
@@ -81,7 +81,7 @@ Stack hiện tại: `server/src/` (Express, better-sqlite3, raw SQL), `client/sr
 | 3.2 | Annotation history + audit trail (API + lưu snapshot trước/sau mỗi save + actor_id) | senior-developer | ✅ | `steps/STEP-3.2-annotation-history.md` | 2026-08-05 09:32 |
 | 3.3 | Activity log cấp project (upload/export/đổi split, timestamp, actor_id) | junior-developer | ✅ | `steps/STEP-3.3-activity-log.md` | 2026-08-05 02:41 |
 | 3.4 | Optimistic locking / conflict detection annotation (dựa trên cột `version`) | senior-developer | ✅ | `steps/STEP-3.4-optimistic-locking.md` | 2026-08-05 10:00 |
-| 3.5 | Đánh dấu ảnh "Xong" (done): cột `completed_at` + `completed_by` FK → `users` vào `images`; UI nút/phím tắt confirm done | senior-developer | ⬜ | `steps/STEP-3.5-image-done-status.md` | - |
+| 3.5 | Đánh dấu ảnh "Xong" (done): cột `completed_at` + `completed_by` FK → `users` vào `images`; UI nút/phím tắt confirm done | senior-developer | ✅ | `steps/STEP-3.5-image-done-status.md` | 2026-08-05 03:20 |
 
 ---
 
@@ -172,6 +172,7 @@ Không có hiện tại.
 | 2026-08-05 09:09 | Bước 2.3 ✅ Done — 4 cột review trên bảng `images`, routes/reviews.js (submit-review/approve/reject + role guard), Row 8 test (8 case) pass. Client: nút Gửi duyệt/Duyệt/Từ chối, filter + badge review. Commit 7775e9b. Test: 87 passed, 0 failed, 3 skipped. tsc --noEmit: 0 lỗi. **Phase 2 (Auth) HOÀN THÀNH.** | senior-developer |
 | 2026-08-05 09:24 | Bước 3.1 ✅ Done — cột `annotations.version` DEFAULT 0, bảng mới `annotation_history` (snapshot) + `activity_log`, auto-backup DB + verify row count trước/sau (CTO condition #1). Kết quả verify: 7 bảng, 0 mất dữ liệu (projects 2→2, classes 4→4, images 1→1, annotations/models/jobs 0→0, users 1→1). Test: 87 passed sau migration (không đổi). SNAPSHOT strategy theo ADR AD-5 (không diff). | senior-developer |
 | 2026-08-05 10:00 | Bước 3.4 ✅ Done — Optimistic locking: 409 ANNOTATION_CONFLICT khi version lệch, backward compat (skip check nếu không gửi expectedVersion), response PUT đổi thành {annotations, annotationVersion}. GET /:imageId trả thêm annotationVersion. Client annotationVersionRef + 409 handling. Row 18 test (12 case). 113 passed, 0 failed, tsc 0 lỗi. Commit 9270a82. | senior-developer |
+| 2026-08-05 03:20 | Bước 3.5 ✅ Done — m006 migration (completed_at/completed_by), POST/DELETE mark-done, submit-review gate IMAGE_NOT_COMPLETED, UI nút Xong + phím D, filter + badge ProjectDetailPage. Row 19 (15 case). 128 passed, 0 failed, tsc 0 lỗi. Commit ac61d98. **Phase 3 HOÀN TOÀN HOÀN THÀNH.** | senior-developer |
 
 ---
 **Status icons:** ⬜ Todo | 🔄 In Progress | ✅ Done | 🛑 Blocked | ⏭️ Skipped

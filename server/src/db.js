@@ -329,6 +329,19 @@ m005_phase3_schema();
 // Giữ tối đa 200 version gần nhất mỗi ảnh (ADR AD-5 retention policy).
 export const HISTORY_MAX_VERSIONS = 200;
 
+// ─── Activity log helper ───────────────────────────────────────────────────────
+// Gọi bởi routes/images.js, routes/export.js, routes/reviews.js (STEP-3.3).
+// Non-blocking: lỗi ghi log KHÔNG throw để không ảnh hưởng main flow.
+export function logActivity(projectId, actorId, action, detail) {
+  try {
+    db.prepare(
+      'INSERT INTO activity_log (project_id, actor_id, action, detail) VALUES (?, ?, ?, ?)'
+    ).run(projectId, actorId ?? null, action, detail ? JSON.stringify(detail) : null);
+  } catch (e) {
+    console.error('[activity_log] Insert failed:', e.message);
+  }
+}
+
 export function pruneAnnotationHistory(imageId) {
   const n = db
     .prepare('SELECT COUNT(*) AS n FROM annotation_history WHERE image_id = ?')

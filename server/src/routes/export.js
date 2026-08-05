@@ -2,7 +2,7 @@ import { Router } from 'express';
 import archiver from 'archiver';
 import path from 'node:path';
 import fs from 'node:fs';
-import { db, UPLOAD_DIR } from '../db.js';
+import { db, UPLOAD_DIR, logActivity } from '../db.js';
 
 const router = Router({ mergeParams: true });
 
@@ -229,6 +229,12 @@ router.get('/', (req, res) => {
     archive.destroy();
     return res.status(400).json({ error: 'Định dạng export không hợp lệ (yolo | coco | voc)' });
   }
+
+  // STEP-3.3: ghi log khi export được thực hiện (format đã validated → không phải error path)
+  logActivity(req.params.projectId, req.user?.id ?? null, 'export', {
+    format,
+    count: images.length,
+  });
 
   archive.finalize();
 });

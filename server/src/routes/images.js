@@ -6,7 +6,7 @@ import os from 'node:os';
 import sharp from 'sharp';
 import AdmZip from 'adm-zip';
 import { nanoid } from 'nanoid';
-import { db, UPLOAD_DIR } from '../db.js';
+import { db, UPLOAD_DIR, logActivity } from '../db.js';
 import { requireRole } from '../middleware/roles.js';
 
 const router = Router({ mergeParams: true });
@@ -92,6 +92,14 @@ router.post('/upload', upload.array('images', MAX_FILES_PER_UPLOAD), async (req,
       fs.unlink(file.path, () => {});
     }
   }
+  // STEP-3.3: ghi activity log sau khi upload thành công
+  if (created.length > 0) {
+    logActivity(req.params.projectId, req.user?.id ?? null, 'image_upload', {
+      count: created.length,
+      names: created.map((i) => i.original_name),
+    });
+  }
+
   res.status(201).json(created);
 });
 
@@ -141,6 +149,15 @@ router.post('/upload-zip', zipUpload.single('zip'), async (req, res) => {
     fs.unlink(req.file.path, () => {});
   }
 
+  // STEP-3.3: ghi activity log sau khi upload zip thành công
+  if (created.length > 0) {
+    logActivity(req.params.projectId, req.user?.id ?? null, 'image_upload', {
+      count: created.length,
+      names: [req.file.originalname],
+      source: 'zip',
+    });
+  }
+
   res.status(201).json({ created, skipped });
 });
 
@@ -161,6 +178,16 @@ router.patch('/:imageId', (req, res) => {
 
   db.prepare('UPDATE images SET split = ?, status = ? WHERE id = ?')
     .run(split ?? existing.split, status ?? existing.status, req.params.imageId);
+
+  // STEP-3.3: ghi log khi split thực sự thay đổi
+  if (split !== undefined && split !== null && split !== existing.split) {
+    logActivity(req.params.projectId, req.user?.id ?? null, 'split_change', {
+      image_id: req.params.imageId,
+      from: existing.split,
+      to: split,
+    });
+  }
+
   res.json(db.prepare('SELECT * FROM images WHERE id = ?').get(req.params.imageId));
 });
 
@@ -179,6 +206,13 @@ router.delete('/:imageId', (req, res) => {
 
   fs.unlink(path.join(UPLOAD_DIR, req.params.projectId, existing.filename), () => {});
   db.prepare('DELETE FROM images WHERE id = ?').run(req.params.imageId);
+
+  // STEP-3.3: ghi log sau khi xoá ảnh thành công
+  logActivity(req.params.projectId, req.user?.id ?? null, 'image_delete', {
+    image_id: req.params.imageId,
+    filename: existing.original_name,
+  });
+
   res.status(204).end();
 });
 

@@ -21,6 +21,7 @@ import jobsRouter from './routes/jobs.js';
 import thumbnailsRouter from './routes/thumbnails.js';
 import reviewsRouter from './routes/reviews.js';
 import historyRouter from './routes/history.js';
+import activityRouter from './routes/activity.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -142,6 +143,7 @@ app.use('/api/jobs', jobsRouter);
 app.use('/api/images', thumbnailsRouter);
 app.use('/api/images/:imageId', reviewsRouter);
 app.use('/api/images/:imageId', historyRouter);
+app.use('/api/projects/:projectId/activity', activityRouter);
 
 // ─── SPA fallback ─────────────────────────────────────────────────────────────
 const clientDist = path.join(__dirname, '..', '..', 'client', 'dist');

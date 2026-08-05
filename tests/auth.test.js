@@ -542,6 +542,50 @@ async function runTests() {
   const meData = await meRes.json();
   ok('W5: /api/auth/me does not expose password_hash', !('password_hash' in meData));
 
+  // ── Row 17: Activity log (STEP-3.3) ─────────────────────────────────────
+  console.log('\n── Row 17: Activity log (all roles 200, unauth 401) ──');
+
+  // Setup: upload ảnh mới để tạo ít nhất 1 entry image_upload
+  const img17UploadRes = await uploadImage(PID, adminToken);
+  ok('Row17 setup: upload image for activity log', img17UploadRes.status === 201);
+  const img17Id = (await img17UploadRes.json())[0]?.id;
+
+  // GET /api/projects/:PID/activity — tất cả role được xem
+  const act17Admin = await get(`/api/projects/${PID}/activity`, adminToken);
+  ok('GET /activity [admin → 200]', act17Admin.status === 200, `got ${act17Admin.status}`);
+  const act17Data = await act17Admin.json();
+  ok(
+    'Activity log có ít nhất 1 entry image_upload',
+    Array.isArray(act17Data) && act17Data.some((e) => e.action === 'image_upload'),
+    `entries: ${JSON.stringify(act17Data.map((e) => e.action))}`
+  );
+
+  await checkStatus('GET /activity [reviewer → 200]',  () => get(`/api/projects/${PID}/activity`, reviewerToken),  200);
+  await checkStatus('GET /activity [annotator → 200]', () => get(`/api/projects/${PID}/activity`, annotatorToken), 200);
+  await checkStatus('GET /activity [unauth → 401]',    () => get(`/api/projects/${PID}/activity`, null),            401);
+
+  // Verify split_change được log khi PATCH split
+  if (img17Id) {
+    await patch(`/api/projects/${PID}/images/${img17Id}`, { split: 'valid' }, adminToken);
+    const act17Split = await (await get(`/api/projects/${PID}/activity`, adminToken)).json();
+    ok(
+      'Activity log có entry split_change sau PATCH split',
+      act17Split.some((e) => e.action === 'split_change' && e.detail?.image_id === img17Id),
+      `entries: ${JSON.stringify(act17Split.filter((e) => e.action === 'split_change').map((e) => e.detail))}`
+    );
+  }
+
+  // Verify image_delete được log khi DELETE ảnh
+  if (img17Id) {
+    await del(`/api/projects/${PID}/images/${img17Id}`, adminToken);
+    const act17Del = await (await get(`/api/projects/${PID}/activity`, adminToken)).json();
+    ok(
+      'Activity log có entry image_delete sau DELETE ảnh',
+      act17Del.some((e) => e.action === 'image_delete' && e.detail?.image_id === img17Id),
+      `entries: ${JSON.stringify(act17Del.filter((e) => e.action === 'image_delete').map((e) => e.detail))}`
+    );
+  }
+
   // ── Rate limit test ───────────────────────────────────────────────────────
   console.log('\n── Rate limit (10 fail/15min → 429) ──');
   let hit429 = false;

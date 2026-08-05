@@ -3,7 +3,7 @@
 > Tài liệu bản đồ codebase. Mọi coding agent PHẢI đọc file này TRƯỚC khi mở source.
 > Cập nhật ngay sau mỗi PR merge có thay đổi cấu trúc/API/schema.
 >
-> Last verified: 2026-08-05 | Cập nhật: senior-developer (STEP-3.5)
+> Last verified: 2026-08-05 | Cập nhật: senior-developer (STEP-4.1)
 
 ---
 
@@ -195,13 +195,19 @@ Roboflow - Copy/
 | Schema init | `CREATE TABLE IF NOT EXISTS` — idempotent | CONFIRMED |
 | Migrations inline | `PRAGMA table_info` + `ALTER TABLE` cho cột thiếu | CONFIRMED |
 | **[STEP-1.2]** Startup cleanup | `UPDATE jobs SET status='error' WHERE status IN ('running','pending')` — mọi job dở dang khi restart đều bị đánh dấu error | CONFIRMED |
-| Last verified | 2026-08-04 (STEP-1.2) | - |
+| **[STEP-4.1]** `m007_detect_cache()` | CREATE TABLE `detect_cache` + unique index `(image_id, model_id)` + 2 indexes; verify row count trước/sau | CONFIRMED |
+| Last verified | 2026-08-05 (STEP-4.1) | - |
 
 **Inline migrations hiện có (chạy khi server khởi động):**
 1. `annotations.type` — nếu chưa có → ADD COLUMN type TEXT DEFAULT 'bbox'
 2. `annotations.points` — nếu chưa có → ADD COLUMN points TEXT
 3. `classes.hotkey` — nếu chưa có → ADD COLUMN hotkey TEXT
 4. **[STEP-1.2]** Cleanup jobs — UPDATE running/pending → error (startup idempotent)
+5. **[STEP-2.2]** `m003_add_users()` — CREATE TABLE users + seed admin + ADD COLUMN images.uploaded_by
+6. **[STEP-2.3]** `m004_add_review_status()` — ALTER TABLE images (4 review cols) + index
+7. **[STEP-3.1]** `m005_phase3_schema()` — ADD COLUMN annotations.version + CREATE TABLE annotation_history + activity_log; backup + verify row count
+8. **[STEP-3.5]** `m006_add_image_done_columns()` — ALTER TABLE images (completed_at + completed_by) + index; verify row count
+9. **[STEP-4.1]** `m007_detect_cache()` — CREATE TABLE detect_cache + 3 indexes; verify row count
 
 ---
 
@@ -340,20 +346,23 @@ Roboflow - Copy/
 | Imports | db, UPLOAD_DIR, MODEL_DIR, child_process.spawn, readline, node:path, nanoid | CONFIRMED |
 | **[STEP-1.2] Job storage** | **DB-backed**: `createJobInDB()` khi POST; `syncJobToDB()` khi hoàn thành; `getJobFromDB()` khi GET fall-back. In-memory Map chỉ dùng trong quá trình inference đang chạy. | CONFIRMED |
 | **[STEP-1.1] Inference mode mặc định** | HTTP fetch → `http://127.0.0.1:{INFERENCE_PORT}/predict` (FastAPI service thường trực) | CONFIRMED |
-| **[STEP-1.1] Rollback mode** | `USE_LEGACY_INFER=1` → dùng spawn infer.py stdin/stdout cũ (giữ nguyên để rollback) | CONFIRMED |
+| **[STEP-1.1] Rollback mode** | `USE_LEGACY_INFER=1` → dùng spawn infer.py stdin/stdout cũ (giữ nguyên để rollback, KHÔNG có detect_cache) | CONFIRMED |
 | Health gate | Trước mỗi job, gọi `GET /health` (timeout 3s); trả 503 nếu service chưa sẵn sàng | CONFIRMED |
 | Batch size | 32 ảnh/request tới FastAPI; timeout 5 phút/batch | CONFIRMED |
+| **[STEP-4.1] detect_cache** | `CACHE_RAW_CONF=0.01`; `getCachedDetections(imageId, modelId)` → cache hit: `filterRawBoxesByConf(conf)` → saveDetections; cache miss: gọi inference với CACHE_RAW_CONF → `saveToCacheDetections()` → filter → save | CONFIRMED |
 | Env vars đọc | `INFERENCE_PORT` (default 8001), `USE_LEGACY_INFER` | CONFIRMED |
-| Last verified | 2026-08-04 (STEP-1.2) | - |
+| Last verified | 2026-08-05 (STEP-4.1) | - |
 
 | Method | Path | File:Line | Mô tả |
 |---|---|---|---|
-| POST | `/` | autolabel.js:~290 | Khởi chạy job inference; tạo row DB ngay; returns `{jobId, total}` 202 |
-| GET | `/:jobId` | autolabel.js:~350 | Poll trạng thái: memory Map → fall-back DB |
+| POST | `/` | autolabel.js:~340 | Khởi chạy job inference; tạo row DB ngay; returns `{jobId, total}` 202 |
+| GET | `/:jobId` | autolabel.js:~400 | Poll trạng thái: memory Map → fall-back DB |
+| DELETE | `/cache` | autolabel.js:~420 | Xóa detect_cache entries theo project (+ filter ?imageId=&modelId=). Auth required. Response: `{deleted: N}` |
 
 **Cơ chế mới (STEP-1.1):** `checkInferenceHealth()` → `fetch(INFERENCE_URL/predict, batch)` → parse response `{classes, results, errors}` → `saveDetectionsForImage()` → cập nhật job.
+**Cơ chế cache (STEP-4.1):** Mỗi batch: tách `hits` (có cache) / `misses` (cần inference). Hits: load raw_detections từ detect_cache → `filterRawBoxesByConf(conf)` → save. Misses: gọi inference với `CACHE_RAW_CONF=0.01` → `saveToCacheDetections()` → `filterRawBoxesByConf(conf)` → save. Cho phép đổi conf threshold mà không detect lại model.
 **Cơ chế persist (STEP-1.2):** `createJobInDB()` khi POST; HTTP mode `.then()/.catch()` → `syncJobToDB()` → `jobs.delete()`. Legacy mode: `setInterval(500ms)` poll job.status → sync khi done/error.
-**Legacy (USE_LEGACY_INFER=1):** `spawn(PYTHON_BIN, [INFER_SCRIPT])` → stdin JSON → readline stdout — giữ nguyên, không xóa.
+**Legacy (USE_LEGACY_INFER=1):** `spawn(PYTHON_BIN, [INFER_SCRIPT])` → stdin JSON → readline stdout — giữ nguyên, không xóa. **KHÔNG dùng detect_cache trong legacy mode.**
 **Depth-1 callers:** index.js (mount `/api/projects/:pid/auto-label`) — không thay đổi mount path.
 
 ---
@@ -606,9 +615,10 @@ Các interface chính:
 }
 ```
 
-**Output bbox:** `{class_index, type:"bbox", x, y, w, h}` — tương thích với infer.py cũ
-**Output quad (OBB):** `{class_index, type:"quad", points:[{x,y}×4]}`
+**Output bbox:** `{class_index, conf, type:"bbox", x, y, w, h}` — **STEP-4.1**: thêm `conf` (float 0-1) để Node.js lưu raw detections vào detect_cache
+**Output quad (OBB):** `{class_index, conf, type:"quad", points:[{x,y}×4]}` — **STEP-4.1**: thêm `conf`
 **Error handling:** Per-image try/except → gộp vào `errors[]` (không crash toàn batch)
+**Backward compat:** `saveDetectionsForImage()` trong Node.js không đọc `conf` (ignore) — KHÔNG break existing behavior. `conf` chỉ được dùng bởi `filterRawBoxesByConf()` khi lấy từ detect_cache.
 
 ---
 
@@ -722,6 +732,21 @@ Các interface chính:
 
 **Index:** `idx_models_project ON models(project_id)`
 
+### Bảng `detect_cache` — STEP-4.1 MỚI
+
+| Cột | Kiểu | Ràng buộc |
+|---|---|---|
+| id | INTEGER | PRIMARY KEY AUTOINCREMENT |
+| image_id | TEXT | NOT NULL, FK→images(id) ON DELETE CASCADE |
+| model_id | TEXT | NOT NULL, FK→models(id) ON DELETE CASCADE |
+| raw_detections | TEXT | NOT NULL — JSON: `{classes:string[], boxes:[{class_index,conf,x,y,w,h,type,points?}]}` — conf gốc, KHÔNG áp threshold |
+| created_at | TEXT | NOT NULL DEFAULT datetime('now') |
+
+**Index:** `idx_detect_cache_img_model UNIQUE ON detect_cache(image_id, model_id)` — 1 entry/cặp ảnh-model; `idx_detect_cache_image`, `idx_detect_cache_model`
+**Cascade:** ON DELETE CASCADE cả `image_id` lẫn `model_id` → cache tự xóa khi ảnh hoặc model bị xóa.
+**Thiết kế:** Cache theo `(image_id, model_id)` — không cache theo conf/iou. raw_detections lưu ở `CACHE_RAW_CONF=0.01` để cho phép đổi conf user mà không detect lại. IoU=0.45 (default inference service) — NMS đã áp tại inference, không thể thay đổi từ cache.
+**INSERT OR REPLACE:** `saveToCacheDetections()` dùng UPSERT — detect lại cùng ảnh+model sẽ cập nhật cache.
+
 ### Bảng `jobs` — STEP-1.2 MỚI
 
 | Cột | Kiểu | Ràng buộc |
@@ -820,8 +845,9 @@ Query params export: `format=yolo\|coco\|voc`, `splitMode=manual\|auto`, `trainR
 
 | Method | Path | File:Line | Response |
 |---|---|---|---|
-| POST | /api/projects/:pid/auto-label | autolabel.js:~290 | {jobId, total} (202) |
-| GET | /api/projects/:pid/auto-label/:jid | autolabel.js:~350 | AutoLabelJob (memory → DB fallback) |
+| POST | /api/projects/:pid/auto-label | autolabel.js:~340 | {jobId, total} (202) |
+| GET | /api/projects/:pid/auto-label/:jid | autolabel.js:~400 | AutoLabelJob (memory → DB fallback) |
+| DELETE | /api/projects/:pid/auto-label/cache | autolabel.js:~420 | `{deleted: N}` — xóa detect_cache entries của project; filter: ?imageId=, ?modelId= (tùy chọn); auth required (mọi role); 404 nếu project không tồn tại — STEP-4.1 MỚI |
 
 ### Jobs (STEP-1.2 MỚI)
 
@@ -1024,11 +1050,26 @@ Query params export: `format=yolo\|coco\|voc`, `splitMode=manual\|auto`, `trainR
 
 ---
 
-### Phase 4.1 — Detect cache
+### Phase 4.1 — Detect cache — ✅ HOÀN THÀNH
 
-**Files bị ảnh hưởng:**
-- `server/src/db.js` hoặc file migration riêng — CREATE TABLE `detect_cache`
-- `server/src/routes/autolabel.js` — check cache trước khi gọi inference service
+**Files đã thay đổi (STEP-4.1):**
+- `server/src/db.js` — `m007_detect_cache()`: CREATE TABLE `detect_cache` (id, image_id FK CASCADE, model_id FK CASCADE, raw_detections TEXT, created_at) + UNIQUE idx `(image_id, model_id)` + 2 indexes; verify row count trước/sau (CTO condition #1 pattern).
+- `server/src/routes/autolabel.js` — thêm `CACHE_RAW_CONF=0.01`; helpers `getCachedDetections()`, `saveToCacheDetections()`, `filterRawBoxesByConf()`; refactor `runInferenceHTTP()`: nhận thêm param `modelId`, tách hit/miss per batch, gọi inference với CACHE_RAW_CONF cho miss, lưu raw → filter → save; thêm `DELETE /cache` endpoint; cập nhật call site truyền `model_id`.
+- `server/src/python/inference_service.py` — `_predict_single()`: thêm `conf` field vào mỗi box (bbox: `r.boxes.conf[i]`, OBB: `obb.conf[i]`) — backward compat (Node.js `saveDetectionsForImage` ignore field này).
+- `tests/auth.test.js` — Row 20 (4 test case): DELETE /cache unauth→401, admin→200, annotator→200, bad project→404. Header comment cập nhật.
+
+**Verify row count (m007):** CREATE TABLE mới — không có risk mất dữ liệu existing. Pattern giữ nhất quán với m005/m006.
+**Test kết quả:** 133 passed, 0 failed, 0 skipped (128 cũ + 5 mới Row 20).
+
+**Depth-1 callers:**
+- `index.js` (mount `/api/projects/:pid/auto-label`) — không đổi mount path
+- `client/api.ts startAutoLabel` — REST interface giữ nguyên (không cần sửa client)
+
+**Watch out cho STEP-4.2 (Prefill bbox):**
+- Dùng lại `getCachedDetections(imageId, modelId)` + `filterRawBoxesByConf(boxes, conf)` từ autolabel.js khi mở ảnh chưa label — 2 hàm này có thể import hoặc copy
+- Cache key là `(image_id, model_id)` — STEP-4.2 cần biết `model_id` đang active của project
+- `CACHE_RAW_CONF=0.01` đã được dùng để build cache; STEP-4.2 chỉ cần đọc cache + filter, không detect lại
+- Nếu cache miss khi mở ảnh → STEP-4.2 tự quyết định: gọi inference ngầm hoặc hiện thông báo "chưa có cache"
 
 ---
 
@@ -1064,3 +1105,4 @@ Query params export: `format=yolo\|coco\|voc`, `splitMode=manual\|auto`, `trainR
 | 2026-08-05 | junior-developer (STEP-3.3) | Thêm §3.15 activity.js (MỚI), cập nhật §2 (routes/activity.js), §3.1 (mount /api/projects/:id/activity + activityRouter), §3.2 (db.js exports: logActivity), §3.9 (images.js gọi logActivity), §3.10 (export.js gọi logActivity), §9 Phase 3.3 DONE — 101 test pass (0 fail, 0 skip) | a0f01dc |
 | 2026-08-05 | senior-developer (STEP-3.4) | Cập nhật §3.5 (GET /:imageId trả thêm annotationVersion), §3.6 (annotations.js — optimistic locking: check expectedVersion trước transaction, PUT response đổi từ Annotation[] thành {annotations, annotationVersion}), §4.2 (api.ts — saveAnnotations thêm tham số expectedVersion), §4.3 (ImageWithAnnotations.annotationVersion), §4.4 (AnnotatorPage — annotationVersionRef, 409 handling), §7 (PUT annotations response 409), §9 Phase 3.4 DONE — 113 test pass (0 fail, 0 skip), tsc 0 lỗi | (STEP-3.4) |
 | 2026-08-05 | senior-developer (STEP-3.5) | Cập nhật §6 (images — 2 cột mới completed_at/completed_by + index), §7 (Images — 2 endpoint MỚI POST/DELETE mark-done; reviews.js gate IMAGE_NOT_COMPLETED), §9 Phase 3.5 DONE — 128 test pass (0 fail, 0 skip), tsc 0 lỗi. **Phase 3 HOÀN TOÀN HOÀN THÀNH.** | (STEP-3.5) |
+| 2026-08-05 | senior-developer (STEP-4.1) | Thêm bảng `detect_cache` (§6), route `DELETE /cache` (§3.10/§7), cache raw detections theo (image_id, model_id) trong `autolabel.js`, `inference_service.py` trả thêm `conf`, §9 Phase 4.1 DONE — 133 test pass (0 fail, 0 skip) | ac61d98→(STEP-4.1) |

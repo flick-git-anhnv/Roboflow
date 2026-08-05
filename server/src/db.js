@@ -385,6 +385,74 @@ function m006_add_image_done_columns() {
 
 m006_add_image_done_columns();
 
+// ─── m007_detect_cache ─────────────────────────────────────────────────────────
+// STEP-4.1: Cache kết quả detect theo (image_id, model_id).
+//
+// raw_detections: JSON text — toàn bộ box + conf score gốc, KHÔNG áp threshold.
+// Node.js gọi inference với CACHE_RAW_CONF=0.01, lưu raw vào đây, sau đó tự
+// lọc theo conf threshold của user ở tầng application. Cho phép đổi conf/IoU
+// mà không cần detect lại.
+//
+// Unique index trên (image_id, model_id): 1 entry/cặp ảnh-model.
+// ON DELETE CASCADE trên image_id → cache tự xóa khi ảnh bị xóa.
+// ON DELETE CASCADE trên model_id → cache tự xóa khi model bị xóa.
+//
+// Idempotent: kiểm tra sqlite_master trước khi CREATE.
+// Verify: row count trước/sau (CTO condition #1 pattern — dù bảng mới không có
+// risk mất dữ liệu existing, giữ pattern nhất quán với m005/m006).
+function m007_detect_cache() {
+  const existingTables = db
+    .prepare("SELECT name FROM sqlite_master WHERE type='table'")
+    .all()
+    .map((r) => r.name);
+  if (existingTables.includes('detect_cache')) return; // already migrated
+
+  // Row count BEFORE (theo pattern CTO condition #1)
+  const TRACKED = ['projects', 'classes', 'images', 'annotations', 'models', 'jobs', 'users'];
+  const before = {};
+  for (const t of TRACKED) {
+    try { before[t] = db.prepare(`SELECT COUNT(*) AS n FROM "${t}"`).get().n; }
+    catch (_) { before[t] = null; }
+  }
+  console.log('[INFO] m007: Row counts BEFORE migration:', JSON.stringify(before));
+
+  db.exec(`
+    CREATE TABLE detect_cache (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      image_id       TEXT    NOT NULL REFERENCES images(id)  ON DELETE CASCADE,
+      model_id       TEXT    NOT NULL REFERENCES models(id)  ON DELETE CASCADE,
+      raw_detections TEXT    NOT NULL,
+      created_at     TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX idx_detect_cache_img_model ON detect_cache(image_id, model_id);
+    CREATE INDEX idx_detect_cache_image  ON detect_cache(image_id);
+    CREATE INDEX idx_detect_cache_model  ON detect_cache(model_id);
+  `);
+
+  // Row count AFTER
+  const after = {};
+  for (const t of TRACKED) {
+    try { after[t] = db.prepare(`SELECT COUNT(*) AS n FROM "${t}"`).get().n; }
+    catch (_) { after[t] = null; }
+  }
+  console.log('[INFO] m007: Row counts AFTER  migration:', JSON.stringify(after));
+
+  for (const t of TRACKED) {
+    if (before[t] === null) continue;
+    if (after[t] !== null && after[t] < before[t]) {
+      const msg =
+        `[CRITICAL] DATA LOSS in table "${t}": ${before[t]} rows → ${after[t]} rows. ` +
+        `Migration: m007_detect_cache`;
+      console.error(msg);
+      throw new Error(msg);
+    }
+  }
+
+  console.log('[INFO] m007: detect_cache table created ✓');
+}
+
+m007_detect_cache();
+
 // ─── Retention helper: annotation_history ─────────────────────────────────────
 // Gọi bởi STEP-3.2 (routes/history.js) ngay sau mỗi INSERT INTO annotation_history.
 // Giữ tối đa 200 version gần nhất mỗi ảnh (ADR AD-5 retention policy).

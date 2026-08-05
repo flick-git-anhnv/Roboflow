@@ -1,7 +1,7 @@
 ---
 task: labeling-studio-improve
 created: 2026-08-04
-updated: 2026-08-05 03:20
+updated: 2026-08-05 10:33
 status: active
 workflow: WF-FEATURE (đa phase)
 priority: P1
@@ -91,7 +91,7 @@ Stack hiện tại: `server/src/` (Express, better-sqlite3, raw SQL), `client/sr
 
 | # | Bước | Agent | Status | Step file | Hoàn thành lúc |
 |---|------|-------|--------|-----------|-----------------|
-| 4.1 | Cache kết quả detect theo ảnh (persist, tương tự detect_cache.py tool cũ) | senior-developer | ⬜ | `steps/STEP-4.1-detect-cache.md` | - |
+| 4.1 | Cache kết quả detect theo ảnh (persist, tương tự detect_cache.py tool cũ) | senior-developer | ✅ | `steps/STEP-4.1-detect-cache.md` | 2026-08-05 10:33 |
 | 4.2 | Prefill bbox tự động khi mở ảnh chưa label (detect nền + gợi ý sẵn box) | senior-developer | ⬜ | `steps/STEP-4.2-prefill-bbox.md` | - |
 
 ---
@@ -173,6 +173,7 @@ Không có hiện tại.
 | 2026-08-05 09:24 | Bước 3.1 ✅ Done — cột `annotations.version` DEFAULT 0, bảng mới `annotation_history` (snapshot) + `activity_log`, auto-backup DB + verify row count trước/sau (CTO condition #1). Kết quả verify: 7 bảng, 0 mất dữ liệu (projects 2→2, classes 4→4, images 1→1, annotations/models/jobs 0→0, users 1→1). Test: 87 passed sau migration (không đổi). SNAPSHOT strategy theo ADR AD-5 (không diff). | senior-developer |
 | 2026-08-05 10:00 | Bước 3.4 ✅ Done — Optimistic locking: 409 ANNOTATION_CONFLICT khi version lệch, backward compat (skip check nếu không gửi expectedVersion), response PUT đổi thành {annotations, annotationVersion}. GET /:imageId trả thêm annotationVersion. Client annotationVersionRef + 409 handling. Row 18 test (12 case). 113 passed, 0 failed, tsc 0 lỗi. Commit 9270a82. | senior-developer |
 | 2026-08-05 03:20 | Bước 3.5 ✅ Done — m006 migration (completed_at/completed_by), POST/DELETE mark-done, submit-review gate IMAGE_NOT_COMPLETED, UI nút Xong + phím D, filter + badge ProjectDetailPage. Row 19 (15 case). 128 passed, 0 failed, tsc 0 lỗi. Commit ac61d98. **Phase 3 HOÀN TOÀN HOÀN THÀNH.** | senior-developer |
+| 2026-08-05 10:33 | Bước 4.1 ✅ Done — bảng `detect_cache` (m007, image_id+model_id UNIQUE), cache RAW detections tại CACHE_RAW_CONF=0.01 + filter conf ở tầng app (đổi threshold không cần detect lại), `inference_service.py` trả thêm `conf`, `DELETE /cache` endpoint. Row 20 (5 case). 133 passed, 0 failed. | senior-developer |
 
 ---
 **Status icons:** ⬜ Todo | 🔄 In Progress | ✅ Done | 🛑 Blocked | ⏭️ Skipped

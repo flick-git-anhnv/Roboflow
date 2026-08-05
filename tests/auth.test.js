@@ -20,6 +20,7 @@
  *  Row 14: CRUD users / register → annotator 403, reviewer 403, admin 201/200
  *  Row 15: PATCH self (display_name) → all roles 200 (self); annotator change role → 403
  *  Row 16: Change role/is_active of other → annotator 403, reviewer 403, admin 200
+ *  Row 20: detect_cache endpoints (STEP-4.1) → unauthenticated 401, authenticated 200
  *
  * Security warning tests (ADR §6.3):
  *  W1: Same error message for wrong username vs wrong password
@@ -722,6 +723,50 @@ async function runTests() {
     const unmarkAdminData = await unmarkAdminRes.json();
     ok('Row19: sau unmark — completed_at = null', unmarkAdminData.completed_at === null || unmarkAdminData.completed_at === undefined,
       `completed_at=${unmarkAdminData.completed_at}`);
+  }
+
+  // ── Row 20: detect_cache (STEP-4.1) ──────────────────────────────────────
+  // NOTE: Server chạy với USE_LEGACY_INFER=1 nên không có cache entry nào được
+  // tạo qua auto-label. Test này kiểm tra endpoint tồn tại và hoạt động đúng:
+  // - Unauthenticated → 401
+  // - Authenticated   → 200 với { deleted: 0 } (cache rỗng vì legacy mode)
+  // - imageId không tồn tại trong project → 200 với { deleted: 0 } (không lỗi)
+  console.log('\n── Row 20: detect_cache ──');
+  {
+    // 1. DELETE cache unauthenticated → 401
+    const cacheDelUnauth = await fetch(`${BASE}/api/projects/${PID}/auto-label/cache`, {
+      method: 'DELETE',
+    });
+    ok('Row20: DELETE /cache unauthenticated → 401', cacheDelUnauth.status === 401,
+      `got ${cacheDelUnauth.status}`);
+
+    // 2. DELETE cache (toàn bộ project) — admin → 200 với deleted count
+    const cacheDelAll = await fetch(`${BASE}/api/projects/${PID}/auto-label/cache`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    ok('Row20: DELETE /cache admin → 200', cacheDelAll.status === 200,
+      `got ${cacheDelAll.status}`);
+    const cacheDelAllData = await cacheDelAll.json();
+    ok('Row20: DELETE /cache trả { deleted: number }',
+      typeof cacheDelAllData.deleted === 'number',
+      `deleted=${cacheDelAllData.deleted}`);
+
+    // 3. DELETE cache với imageId filter → 200 (không lỗi dù image không có cache)
+    const cacheDelImg = await fetch(
+      `${BASE}/api/projects/${PID}/auto-label/cache?imageId=nonexistent-id`,
+      { method: 'DELETE', headers: { Authorization: `Bearer ${annotatorToken}` } },
+    );
+    ok('Row20: DELETE /cache?imageId= annotator → 200', cacheDelImg.status === 200,
+      `got ${cacheDelImg.status}`);
+
+    // 4. DELETE cache project không tồn tại → 404
+    const cacheDelBadProj = await fetch(`${BASE}/api/projects/nonexistent/auto-label/cache`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    ok('Row20: DELETE /cache bad project → 404', cacheDelBadProj.status === 404,
+      `got ${cacheDelBadProj.status}`);
   }
 
   // ── Rate limit test ───────────────────────────────────────────────────────

@@ -116,6 +116,9 @@ def _predict_single(model, img_path: str, conf: float, iou: float) -> list:
     """
     Chạy YOLO predict trên 1 ảnh.
     Trả về list box dict (bbox hoặc quad), tương thích với format infer.py cũ.
+    STEP-4.1: Mỗi box bổ sung field `conf` (float 0-1) để hỗ trợ detect_cache —
+    Node.js lưu raw detections (conf=CACHE_RAW_CONF) vào cache, sau đó áp
+    threshold ở tầng application mà không cần gọi lại inference.
     """
     results = model.predict(source=img_path, conf=conf, iou=iou, verbose=False)
     r = results[0]
@@ -126,9 +129,11 @@ def _predict_single(model, img_path: str, conf: float, iou: float) -> list:
         # OBB model → quad (4-điểm)
         for i in range(len(obb)):
             cls_idx = int(obb.cls[i].item())
+            conf_score = float(obb.conf[i].item())
             pts = obb.xyxyxyxy[i].tolist()
             boxes_out.append({
                 "class_index": cls_idx,
+                "conf": conf_score,
                 "type": "quad",
                 "points": [{"x": float(p[0]), "y": float(p[1])} for p in pts],
             })
@@ -136,9 +141,11 @@ def _predict_single(model, img_path: str, conf: float, iou: float) -> list:
         # Standard bbox model
         for i in range(len(r.boxes)):
             cls_idx = int(r.boxes.cls[i].item())
+            conf_score = float(r.boxes.conf[i].item())
             x1, y1, x2, y2 = [float(v) for v in r.boxes.xyxy[i].tolist()]
             boxes_out.append({
                 "class_index": cls_idx,
+                "conf": conf_score,
                 "type": "bbox",
                 "x": x1, "y": y1, "w": x2 - x1, "h": y2 - y1,
             })

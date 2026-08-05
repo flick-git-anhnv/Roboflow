@@ -13,12 +13,17 @@ const PYTHON_BIN = process.env.PYTHON_BIN || 'python';
 const INFER_SCRIPT = path.join(__dirname, '..', 'python', 'infer.py');
 
 // ─── Inference service config ─────────────────────────────────────────────────
-// USE_LEGACY_INFER=1  → dùng spawn infer.py cũ (rollback)
-// Mặc định           → gọi HTTP tới FastAPI service tại INFERENCE_PORT
+// USE_LEGACY_INFER=1  → dùng spawn infer.py cũ (rollback, KHÔNG có cache)
+// Mặc định           → gọi HTTP tới FastAPI service tại INFERENCE_PORT (có cache)
 const INFERENCE_PORT = process.env.INFERENCE_PORT || '8001';
 const INFERENCE_URL = `http://127.0.0.1:${INFERENCE_PORT}`;
 const INFERENCE_BATCH_SIZE = 32;
 const USE_LEGACY_INFER = process.env.USE_LEGACY_INFER === '1';
+
+// STEP-4.1: Threshold thấp dùng khi gọi inference để build cache.
+// Lưu raw detections ở conf>=0.01 → Node.js tự lọc theo conf user tại application layer.
+// Cho phép đổi conf threshold mà không detect lại.
+const CACHE_RAW_CONF = 0.01;
 
 // In-memory tracker cho các job ĐANG CHẠY (fast polling trong quá trình inference).
 // Khi inference xong → state được sync vào DB, entry được xoá khỏi Map.
@@ -132,6 +137,51 @@ function saveDetectionsForImage(imageId, boxes, classIdMap) {
   return rows.length;
 }
 
+// ─── STEP-4.1: detect_cache helpers ──────────────────────────────────────────
+
+/**
+ * Lấy raw_detections từ detect_cache cho (imageId, modelId).
+ * Trả về object {classes, boxes} hoặc null nếu cache miss / parse lỗi.
+ */
+function getCachedDetections(imageId, modelId) {
+  try {
+    const row = db
+      .prepare('SELECT raw_detections FROM detect_cache WHERE image_id = ? AND model_id = ?')
+      .get(imageId, modelId);
+    if (!row) return null;
+    return JSON.parse(row.raw_detections);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Lưu raw detections (chưa áp threshold) vào detect_cache.
+ * Dùng INSERT OR REPLACE để cập nhật nếu đã có entry.
+ * rawDetectionsObj = { classes: string[], boxes: [{class_index, conf, x,y,w,h, type, points?}] }
+ */
+function saveToCacheDetections(imageId, modelId, rawDetectionsObj) {
+  try {
+    db.prepare(`
+      INSERT OR REPLACE INTO detect_cache (image_id, model_id, raw_detections, created_at)
+      VALUES (?, ?, ?, datetime('now'))
+    `).run(imageId, modelId, JSON.stringify(rawDetectionsObj));
+  } catch (e) {
+    console.error(`[detect_cache] Save failed for ${imageId}/${modelId}:`, e.message);
+  }
+}
+
+/**
+ * Lọc raw boxes theo conf threshold ở tầng application.
+ * Boxes không có field `conf` (cache cũ trước STEP-4.1) → coi là đã pass (conf=1).
+ * @param {Array} boxes — mảng box từ raw_detections.boxes
+ * @param {number} confThreshold — threshold user (0-1)
+ * @returns {Array} — chỉ giữ box có conf >= threshold
+ */
+function filterRawBoxesByConf(boxes, confThreshold) {
+  return boxes.filter((b) => (b.conf ?? 1) >= confThreshold);
+}
+
 // ─── Health check: kiểm tra FastAPI service sẵn sàng chưa ────────────────────
 
 /**
@@ -153,70 +203,132 @@ async function checkInferenceHealth() {
   }
 }
 
-// ─── Mode MỚI: HTTP → FastAPI service ────────────────────────────────────────
+// ─── Mode MỚI: HTTP → FastAPI service (với detect_cache) ─────────────────────
 
 /**
  * Chạy inference qua HTTP tới FastAPI service thường trực.
- * Chia job thành batch INFERENCE_BATCH_SIZE=32 ảnh, cập nhật job.done sau mỗi batch.
+ * STEP-4.1: Tích hợp detect_cache —
+ *   - Cache hit  → lấy raw_detections từ DB, lọc conf threshold ở application layer
+ *   - Cache miss → gọi inference với CACHE_RAW_CONF (0.01), lưu raw vào cache,
+ *                  rồi lọc theo conf user trước khi lưu annotations
+ *
+ * Chia job thành batch INFERENCE_BATCH_SIZE=32 ảnh.
  * Cập nhật job object in-place; không trả về giá trị.
+ *
+ * @param {string} projectId
+ * @param {string} modelId   — id trong bảng models (FK cho detect_cache)
+ * @param {string} modelPath — đường dẫn file .pt để gọi inference service
+ * @param {number} conf      — threshold user (áp dụng ở application layer với cache)
+ * @param {Array}  images    — [{id, path}]
+ * @param {object} job       — in-memory job state
  */
-async function runInferenceHTTP(projectId, modelPath, conf, images, job) {
+async function runInferenceHTTP(projectId, modelId, modelPath, conf, images, job) {
   const classCache = {};
 
   for (let i = 0; i < images.length; i += INFERENCE_BATCH_SIZE) {
     const batch = images.slice(i, i + INFERENCE_BATCH_SIZE);
     const batchNum = Math.floor(i / INFERENCE_BATCH_SIZE) + 1;
 
-    try {
-      const controller = new AbortController();
-      // Timeout 5 phút/batch — đủ cho batch lớn trên CPU chậm
-      const tid = setTimeout(() => controller.abort(), 5 * 60 * 1000);
+    // ── Phân loại cache hit / miss ─────────────────────────────────────────
+    const hits   = []; // { img, cached: {classes, boxes} }
+    const misses = []; // img objects cần gọi inference
 
-      let response;
+    for (const img of batch) {
+      const cached = getCachedDetections(img.id, modelId);
+      if (cached) {
+        hits.push({ img, cached });
+      } else {
+        misses.push(img);
+      }
+    }
+
+    // ── Xử lý cache hits (không gọi inference) ────────────────────────────
+    for (const { img, cached } of hits) {
       try {
-        response = await fetch(`${INFERENCE_URL}/predict`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model_path: modelPath, conf, images: batch }),
-          signal: controller.signal,
-        });
-      } finally {
-        clearTimeout(tid);
-      }
-
-      if (!response.ok) {
-        const errText = await response.text().catch(() => '');
-        console.error(`[autolabel] Batch ${batchNum} HTTP ${response.status}: ${errText}`);
-        job.failed += batch.length;
-        job.done += batch.length;
-        continue;
-      }
-
-      const data = await response.json();
-      const { classes = [], results = [], errors = [] } = data;
-
-      // buildClassMapping cache kết quả sau lần gọi đầu tiên (same model, same classes)
-      const classIdMap = buildClassMapping(projectId, classes, classCache);
-      if (classCache.unmatched?.length && job.unmatchedClasses.length === 0) {
-        job.unmatchedClasses = classCache.unmatched;
-      }
-
-      for (const result of results) {
-        job.created += saveDetectionsForImage(result.image_id, result.detections, classIdMap);
+        const classIdMap = buildClassMapping(projectId, cached.classes ?? [], classCache);
+        if (classCache.unmatched?.length && job.unmatchedClasses.length === 0) {
+          job.unmatchedClasses = classCache.unmatched;
+        }
+        // Áp threshold ở application layer — cho phép đổi conf mà không detect lại
+        const filtered = filterRawBoxesByConf(cached.boxes ?? [], conf);
+        job.created += saveDetectionsForImage(img.id, filtered, classIdMap);
         job.done += 1;
-      }
-
-      for (const err of errors) {
-        console.error(`[autolabel] Image ${err.image_id} inference error: ${err.error}`);
+        console.log(`[detect_cache] HIT  image=${img.id} model=${modelId}`);
+      } catch (err) {
+        console.error(`[detect_cache] Error applying cache for ${img.id}: ${err.message}`);
         job.failed += 1;
         job.done += 1;
       }
+    }
 
-    } catch (err) {
-      const reason = err.name === 'AbortError' ? 'timeout (5 min)' : err.message;
-      console.error(`[autolabel] Batch ${batchNum} failed: ${reason}`);
-      job.failed += batch.length;
-      job.done += batch.length;
+    // ── Xử lý cache misses qua HTTP ───────────────────────────────────────
+    if (misses.length > 0) {
+      try {
+        const controller = new AbortController();
+        // Timeout 5 phút/batch — đủ cho batch lớn trên CPU chậm
+        const tid = setTimeout(() => controller.abort(), 5 * 60 * 1000);
+
+        let response;
+        try {
+          response = await fetch(`${INFERENCE_URL}/predict`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model_path: modelPath,
+              // Gọi với conf thấp (CACHE_RAW_CONF) để lưu raw boxes vào cache.
+              // Threshold user (conf) được áp ở application layer sau khi lấy cache.
+              conf: CACHE_RAW_CONF,
+              images: misses,
+            }),
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(tid);
+        }
+
+        if (!response.ok) {
+          const errText = await response.text().catch(() => '');
+          console.error(`[autolabel] Batch ${batchNum} HTTP ${response.status}: ${errText}`);
+          job.failed += misses.length;
+          job.done += misses.length;
+          continue;
+        }
+
+        const data = await response.json();
+        const { classes = [], results = [], errors = [] } = data;
+
+        // buildClassMapping cache kết quả sau lần gọi đầu tiên (same model)
+        const classIdMap = buildClassMapping(projectId, classes, classCache);
+        if (classCache.unmatched?.length && job.unmatchedClasses.length === 0) {
+          job.unmatchedClasses = classCache.unmatched;
+        }
+
+        for (const result of results) {
+          // Lưu raw detections (CACHE_RAW_CONF, không áp threshold user) vào cache
+          saveToCacheDetections(result.image_id, modelId, {
+            classes,
+            boxes: result.detections,
+          });
+          console.log(`[detect_cache] MISS image=${result.image_id} model=${modelId} — saved to cache`);
+
+          // Áp conf threshold user ở application layer trước khi lưu annotations
+          const filtered = filterRawBoxesByConf(result.detections, conf);
+          job.created += saveDetectionsForImage(result.image_id, filtered, classIdMap);
+          job.done += 1;
+        }
+
+        for (const err of errors) {
+          console.error(`[autolabel] Image ${err.image_id} inference error: ${err.error}`);
+          job.failed += 1;
+          job.done += 1;
+        }
+
+      } catch (err) {
+        const reason = err.name === 'AbortError' ? 'timeout (5 min)' : err.message;
+        console.error(`[autolabel] Batch ${batchNum} failed: ${reason}`);
+        job.failed += misses.length;
+        job.done += misses.length;
+      }
     }
   }
 
@@ -332,6 +444,7 @@ router.post('/', async (req, res) => {
     if (USE_LEGACY_INFER) {
       // Legacy mode: runInference dùng event callbacks (không phải Promise).
       // Dùng interval 500ms để phát hiện khi job kết thúc và sync lần cuối vào DB.
+      // NOTE: Legacy mode KHÔNG dùng detect_cache (chỉ HTTP mode mới có cache).
       runInference(projectId, modelPath, conf, images, job);
       const legacySyncTimer = setInterval(() => {
         if (job.status === 'done' || job.status === 'error') {
@@ -341,8 +454,8 @@ router.post('/', async (req, res) => {
         }
       }, 500);
     } else {
-      // HTTP mode: hook vào Promise để sync ngay khi inference kết thúc.
-      runInferenceHTTP(projectId, modelPath, conf, images, job)
+      // HTTP mode (STEP-4.1): truyền model_id để cache theo (image_id, model_id).
+      runInferenceHTTP(projectId, model_id, modelPath, conf, images, job)
         .then(() => {
           syncJobToDB(jobId, job);
           jobs.delete(jobId);
@@ -371,6 +484,55 @@ router.get('/:jobId', (req, res) => {
   const dbJob = getJobFromDB(req.params.jobId);
   if (!dbJob) return res.status(404).json({ error: 'Không tìm thấy tác vụ' });
   res.json(dbJob);
+});
+
+// ─── STEP-4.1: Cache management endpoints ─────────────────────────────────────
+
+/**
+ * DELETE /api/projects/:projectId/auto-label/cache
+ * Xoá detect_cache entries theo ảnh và/hoặc model.
+ * Query params (tuỳ chọn, có thể kết hợp):
+ *   ?imageId=<id>   — chỉ xoá cache của ảnh này
+ *   ?modelId=<id>   — chỉ xoá cache của model này
+ *   (không có param) — xoá toàn bộ cache của project
+ *
+ * Dùng khi: user đổi model, muốn force re-detect, hoặc cần làm sạch cache cũ.
+ * Auth: yêu cầu đăng nhập (mọi role).
+ * Response: { deleted: <số dòng đã xoá> }
+ */
+router.delete('/cache', (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { imageId, modelId } = req.query;
+
+    // Verify project tồn tại
+    const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(projectId);
+    if (!project) return res.status(404).json({ error: 'Không tìm thấy project' });
+
+    // Xoá theo project (subquery) + filter tùy chọn theo imageId / modelId
+    // Dùng subquery images WHERE project_id để scoped đúng project
+    let sql = `
+      DELETE FROM detect_cache
+      WHERE image_id IN (SELECT id FROM images WHERE project_id = ?)
+    `;
+    const params = [projectId];
+
+    if (imageId) {
+      sql += ' AND image_id = ?';
+      params.push(imageId);
+    }
+    if (modelId) {
+      sql += ' AND model_id = ?';
+      params.push(modelId);
+    }
+
+    const result = db.prepare(sql).run(...params);
+    console.log(`[detect_cache] DELETE project=${projectId} imageId=${imageId ?? '*'} modelId=${modelId ?? '*'} → ${result.changes} rows`);
+    res.json({ deleted: result.changes });
+  } catch (err) {
+    console.error('[detect_cache] DELETE /cache error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 export default router;

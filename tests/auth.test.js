@@ -10,8 +10,8 @@
  *  Row 4:  Delete image SELF → annotator:self 204, annotator:other 403, reviewer/admin any 204
  *  Row 5:  Mark "Done" (status=labeled) → all roles 200
  *  Row 6:  Un-mark "Done" for others → annotator 403, reviewer/admin 200
- *  Row 7:  Revert history (Phase 3) → PENDING (route not yet implemented)
- *  Row 8:  Review workflow (Phase 2.3) → PENDING (route not yet implemented)
+ *  Row 7:  Revert history (Phase 3) → annotator 403, reviewer/admin 200 (STEP-3.2)
+ *  Row 8:  Review workflow (Phase 2.3) → implemented STEP-2.3
  *  Row 9:  CRUD classes → all roles 200
  *  Row 10: CRUD models (upload/delete) → annotator 403, reviewer/admin 200/204
  *  Row 11: Auto-label → all roles 202/503 (service may be down)
@@ -298,11 +298,49 @@ async function runTests() {
   await patch(`/api/projects/${PID}/images/${img5ann[0].id}`, { status: 'labeled' }, annotatorToken); // mark first
   await checkStatus('Un-mark done own [annotator self → 200]', () => patch(`/api/projects/${PID}/images/${img5ann[0].id}`, { status: 'unlabeled' }, annotatorToken), 200);
 
-  // ── Row 7: Revert annotation history — PENDING (Phase 3 route) ───────────
+  // ── Row 7: Revert annotation history (STEP-3.2) ─────────────────────────
   console.log('\n── Row 7: Revert annotation history ──');
-  skip('POST /api/images/:id/history/:v/revert [annotator → 403]', 'Phase 3 route not yet implemented');
-  skip('POST /api/images/:id/history/:v/revert [reviewer → 200]',  'Phase 3 route not yet implemented');
-  skip('POST /api/images/:id/history/:v/revert [admin → 200]',     'Phase 3 route not yet implemented');
+  // Setup: upload fresh image, save 2 annotation versions để tạo history
+  const img7UploadRes = await uploadImage(PID, adminToken);
+  const img7Id = (await img7UploadRes.json())[0].id;
+  const ann7v1 = [{ class_id: classId, x: 10, y: 10, w: 50, h: 50, type: 'bbox', points: null }];
+  const ann7v2 = [{ class_id: classId, x: 20, y: 20, w: 60, h: 60, type: 'bbox', points: null }];
+  // Save version 1 → annotation_history version=1
+  await put(`/api/images/${img7Id}/annotations`, { annotations: ann7v1 }, adminToken);
+  // Save version 2 → annotation_history version=2 (current state)
+  await put(`/api/images/${img7Id}/annotations`, { annotations: ann7v2 }, adminToken);
+
+  // GET history để tìm version 1
+  const histListRes = await get(`/api/images/${img7Id}/history`, adminToken);
+  ok('GET /history [admin → 200]', histListRes.status === 200, `got ${histListRes.status}`);
+  const histList = await histListRes.json();
+  const v1entry = histList.find((e) => e.version === 1);
+  ok('History has version 1 entry', !!v1entry, `entries: ${JSON.stringify(histList.map(e => e.version))}`);
+
+  // annotator → 403 (AD-A5 Row 7)
+  await checkStatus(
+    'POST revert [annotator → 403]',
+    () => post(`/api/images/${img7Id}/history/${v1entry?.version ?? 1}/revert`, {}, annotatorToken),
+    403
+  );
+
+  // reviewer → 200, annotations phải khớp snapshot v1
+  const revertRevRes = await post(`/api/images/${img7Id}/history/${v1entry?.version ?? 1}/revert`, {}, reviewerToken);
+  ok('POST revert [reviewer → 200]', revertRevRes.status === 200, `got ${revertRevRes.status}`);
+  if (revertRevRes.status === 200) {
+    const revertRevBody = await revertRevRes.json();
+    ok(
+      'Revert reviewer — annotations match v1 snapshot (x=10)',
+      Array.isArray(revertRevBody.annotations) &&
+        revertRevBody.annotations.length === 1 &&
+        Math.abs(revertRevBody.annotations[0].x - 10) < 0.001,
+      `x=${revertRevBody.annotations?.[0]?.x}`
+    );
+  }
+
+  // admin → 200 (revert lại v1 lần nữa — lúc này current là v1 do reviewer vừa revert)
+  const revertAdmRes = await post(`/api/images/${img7Id}/history/${v1entry?.version ?? 1}/revert`, {}, adminToken);
+  ok('POST revert [admin → 200]', revertAdmRes.status === 200, `got ${revertAdmRes.status}`);
 
   // ── Row 8: Review workflow (Phase 2.3) ───────────────────────────────────
   console.log('\n── Row 8: Review workflow ──');

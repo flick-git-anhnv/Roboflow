@@ -20,6 +20,7 @@ import autolabelRouter from './routes/autolabel.js';
 import jobsRouter from './routes/jobs.js';
 import thumbnailsRouter from './routes/thumbnails.js';
 import reviewsRouter from './routes/reviews.js';
+import historyRouter from './routes/history.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -140,6 +141,7 @@ app.use('/api/projects/:projectId/auto-label', autolabelRouter);
 app.use('/api/jobs', jobsRouter);
 app.use('/api/images', thumbnailsRouter);
 app.use('/api/images/:imageId', reviewsRouter);
+app.use('/api/images/:imageId', historyRouter);
 
 // ─── SPA fallback ─────────────────────────────────────────────────────────────
 const clientDist = path.join(__dirname, '..', '..', 'client', 'dist');

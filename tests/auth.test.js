@@ -586,6 +586,67 @@ async function runTests() {
     );
   }
 
+  // ── Row 18: Optimistic locking (STEP-3.4) ────────────────────────────────
+  console.log('\n── Row 18: Optimistic locking (conflict detection → 409) ──');
+
+  // Setup: upload fresh image, version = 0 tại đây
+  const img18Res = await uploadImage(PID, adminToken);
+  ok('Row18 setup: upload fresh image', img18Res.status === 201);
+  const img18Id = (await img18Res.json())[0]?.id;
+
+  if (img18Id) {
+    // Cả 2 client load ảnh → cùng nhận annotationVersion = 0
+    const img18LoadRes = await get(`/api/projects/${PID}/images/${img18Id}`, adminToken);
+    ok('Row18: GET image returns 200', img18LoadRes.status === 200);
+    const img18Data = await img18LoadRes.json();
+    ok('Row18: GET image trả annotationVersion (số nguyên)', typeof img18Data.annotationVersion === 'number',
+      `annotationVersion=${img18Data.annotationVersion}`);
+    const sharedVersion = img18Data.annotationVersion; // 0
+
+    // Client A (admin) save với expectedVersion=0 → thành công, version tăng lên 1
+    const saveA = await put(`/api/images/${img18Id}/annotations`, {
+      annotations: [{ class_id: classId, x: 1, y: 1, w: 10, h: 10, type: 'bbox', points: null }],
+      expectedVersion: sharedVersion,
+    }, adminToken);
+    ok('Row18: Client A save (expectedVersion khớp) → 200', saveA.status === 200,
+      `got ${saveA.status}`);
+    const saveAData = await saveA.json();
+    ok('Row18: Response PUT chứa annotationVersion=1', saveAData.annotationVersion === 1,
+      `annotationVersion=${saveAData.annotationVersion}`);
+
+    // Client B (reviewer) save với expectedVersion cũ = 0 → 409 (server đã là 1)
+    const saveB = await put(`/api/images/${img18Id}/annotations`, {
+      annotations: [{ class_id: classId, x: 2, y: 2, w: 10, h: 10, type: 'bbox', points: null }],
+      expectedVersion: sharedVersion, // còn giữ version cũ = 0
+    }, reviewerToken);
+    ok('Row18: Client B save (version lệch) → 409', saveB.status === 409,
+      `got ${saveB.status}`);
+    const saveBData = await saveB.json();
+    ok('Row18: 409 response có error=ANNOTATION_CONFLICT', saveBData.error === 'ANNOTATION_CONFLICT',
+      `error=${saveBData.error}`);
+    ok('Row18: 409 response có serverVersion=1', saveBData.serverVersion === 1,
+      `serverVersion=${saveBData.serverVersion}`);
+    ok('Row18: 409 response có message', typeof saveBData.message === 'string' && saveBData.message.length > 0);
+
+    // Backward compat: save KHÔNG gửi expectedVersion → luôn thành công (không conflict check)
+    const saveCompat = await put(`/api/images/${img18Id}/annotations`, {
+      annotations: [],
+      // không gửi expectedVersion
+    }, reviewerToken);
+    ok('Row18: Save không gửi expectedVersion → 200 (backward compat)', saveCompat.status === 200,
+      `got ${saveCompat.status}`);
+    const saveCompatData = await saveCompat.json();
+    ok('Row18: Backward compat response cũng có annotationVersion', typeof saveCompatData.annotationVersion === 'number');
+
+    // Sau backward-compat save, version là 2 — save tiếp với version đúng → thành công
+    const saveC = await put(`/api/images/${img18Id}/annotations`, {
+      annotations: [],
+      expectedVersion: saveCompatData.annotationVersion,
+    }, adminToken);
+    ok('Row18: Save với version mới nhất → 200', saveC.status === 200,
+      `got ${saveC.status}`);
+  }
+
   // ── Rate limit test ───────────────────────────────────────────────────────
   console.log('\n── Rate limit (10 fail/15min → 429) ──');
   let hit429 = false;

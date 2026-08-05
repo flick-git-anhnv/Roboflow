@@ -118,10 +118,17 @@ export const api = {
   deleteImage: (projectId: string, imageId: string) =>
     request<void>(`/api/projects/${projectId}/images/${imageId}`, { method: 'DELETE' }),
 
-  saveAnnotations: (imageId: string, annotations: Omit<Annotation, 'id' | 'image_id'>[]) =>
-    request<Annotation[]>(`/api/images/${imageId}/annotations`, {
+  /** STEP-3.4: expectedVersion là version client đang cầm (từ getImage hay save trước).
+   * Nếu không khớp server sẽ trả 409 — client phải catch và hiển thị cảnh báo reload.
+   * Nếu không truyền expectedVersion → bỏ qua kiểm tra (backward compat). */
+  saveAnnotations: (
+    imageId: string,
+    annotations: Omit<Annotation, 'id' | 'image_id'>[],
+    expectedVersion?: number,
+  ) =>
+    request<{ annotations: Annotation[]; annotationVersion: number }>(`/api/images/${imageId}/annotations`, {
       method: 'PUT',
-      body: JSON.stringify({ annotations }),
+      body: JSON.stringify({ annotations, expectedVersion }),
     }),
 
   exportUrl: (projectId: string, format: 'yolo' | 'coco' | 'voc', splitOptions?: SplitOptions) =>

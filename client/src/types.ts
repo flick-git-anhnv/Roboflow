@@ -72,6 +72,9 @@ export interface Annotation {
 
 export interface ImageWithAnnotations extends ImageItem {
   annotations: Annotation[];
+  /** STEP-3.4: version hiện tại của annotation ảnh này (từ annotation_history).
+   * Client phải gửi lại khi save để server phát hiện conflict (optimistic locking). */
+  annotationVersion: number;
 }
 
 export interface ModelInfo {

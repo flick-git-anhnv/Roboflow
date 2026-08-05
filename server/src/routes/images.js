@@ -69,7 +69,11 @@ router.get('/:imageId', (req, res) => {
   if (!image) return res.status(404).json({ error: 'Không tìm thấy ảnh' });
   const annotations = db.prepare('SELECT * FROM annotations WHERE image_id = ?').all(image.id)
     .map((a) => ({ ...a, points: a.points ? JSON.parse(a.points) : null }));
-  res.json({ ...image, annotations });
+  // STEP-3.4: Trả annotationVersion để client biết expectedVersion cho optimistic locking
+  const { annotationVersion } = db.prepare(
+    'SELECT COALESCE(MAX(version), 0) AS annotationVersion FROM annotation_history WHERE image_id = ?'
+  ).get(image.id);
+  res.json({ ...image, annotations, annotationVersion });
 });
 
 router.post('/upload', upload.array('images', MAX_FILES_PER_UPLOAD), async (req, res) => {

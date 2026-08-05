@@ -52,6 +52,9 @@ export default function AnnotatorPage() {
   const windowListenersRef = useRef<{ move?: (e: MouseEvent) => void; up?: () => void }>({});
   const [scale, setScale] = useState(1);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** STEP-3.4: version annotation hiện tại của ảnh — dùng làm expectedVersion khi save.
+   * Dùng ref thay state để tránh stale closure trong setTimeout của scheduleSave. */
+  const annotationVersionRef = useRef<number>(0);
 
   const [zoom, setZoom] = useState(1);
   const [spaceHeld, setSpaceHeld] = useState(false);
@@ -77,6 +80,8 @@ export default function AnnotatorPage() {
       setDrawingPoints([]);
       setSaveState('saved');
       setZoom(1);
+      // STEP-3.4: ghi nhớ version để dùng làm expectedVersion khi save
+      annotationVersionRef.current = img.annotationVersion ?? 0;
       const el = new window.Image();
       el.onload = () => setImgEl(el);
       el.src = `/uploads/${projectId}/${img.filename}`;
@@ -139,14 +144,42 @@ export default function AnnotatorPage() {
     saveTimer.current = setTimeout(async () => {
       if (!imageId) return;
       setSaveState('saving');
-      await api.saveAnnotations(imageId, nextBoxes.map((b) => ({
-        class_id: b.class_id, x: b.x, y: b.y, w: b.w, h: b.h,
-        type: b.type, points: b.type === 'quad' && b.points ? b.points : null,
-      })));
-      setSaveState('saved');
-      setImages((imgs) => imgs.map((i) => (i.id === imageId ? { ...i, status: nextBoxes.length ? 'labeled' : 'unlabeled' } : i)));
+      try {
+        // STEP-3.4: gửi kèm expectedVersion để server phát hiện conflict
+        const result = await api.saveAnnotations(
+          imageId,
+          nextBoxes.map((b) => ({
+            class_id: b.class_id, x: b.x, y: b.y, w: b.w, h: b.h,
+            type: b.type, points: b.type === 'quad' && b.points ? b.points : null,
+          })),
+          annotationVersionRef.current,
+        );
+        // Cập nhật version sau khi save thành công
+        annotationVersionRef.current = result.annotationVersion;
+        setSaveState('saved');
+        setImages((imgs) => imgs.map((i) => (i.id === imageId ? { ...i, status: nextBoxes.length ? 'labeled' : 'unlabeled' } : i)));
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg === 'ANNOTATION_CONFLICT') {
+          // STEP-3.4: Conflict — reload ảnh để lấy bản mới nhất, thông báo user
+          setSaveState('saved');
+          alert('Ảnh này đã được người khác sửa. Đang tải lại bản mới nhất — thay đổi chưa lưu của bạn sẽ bị mất.');
+          if (projectId) {
+            api.getImage(projectId, imageId).then((img) => {
+              setImage(img);
+              setBoxes(img.annotations.map((a: Annotation) => annotationToBox(a)));
+              annotationVersionRef.current = img.annotationVersion ?? 0;
+              setSaveState('saved');
+            }).catch(() => {});
+          }
+        } else {
+          // Lỗi khác (network, server 5xx...) — giữ trạng thái dirty để retry
+          setSaveState('dirty');
+          console.error('[AnnotatorPage] Save failed:', msg);
+        }
+      }
     }, 600);
-  }, [imageId]);
+  }, [imageId, projectId]);
 
   const updateBoxes = (updater: (prev: Box[]) => Box[]) => {
     setBoxes((prev) => {

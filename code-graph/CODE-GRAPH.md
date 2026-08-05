@@ -3,7 +3,7 @@
 > Tài liệu bản đồ codebase. Mọi coding agent PHẢI đọc file này TRƯỚC khi mở source.
 > Cập nhật ngay sau mỗi PR merge có thay đổi cấu trúc/API/schema.
 >
-> Last verified: 2026-08-05 | Cập nhật: junior-developer (STEP-3.3)
+> Last verified: 2026-08-05 | Cập nhật: senior-developer (STEP-3.4)
 
 ---
 
@@ -253,16 +253,18 @@ Roboflow - Copy/
 | Callers/Used-by | index.js (mounted /api/projects/:projectId/images) | CONFIRMED |
 | Max file size | 100MB / ảnh, 2GB / zip, 20000 ảnh / upload | CONFIRMED |
 | Định dạng | JPG, PNG, WEBP, BMP | CONFIRMED |
-| Last verified | 2026-08-04 | - |
+| Last verified | 2026-08-05 (STEP-3.4) | - |
 
 | Method | Path | File:Line | Mô tả |
 |---|---|---|---|
 | GET | `/` | images.js:51 | List images (kèm class_ids array + **thumbnail_url** — STEP-1.3) |
-| GET | `/:imageId` | images.js:64 | Get single image + annotations |
+| GET | `/:imageId` | images.js:64 | Get single image + annotations + **annotationVersion** (STEP-3.4) |
 | POST | `/upload` | images.js:73 | Upload nhiều file ảnh (multer.array) |
 | POST | `/upload-zip` | images.js:95 | Upload ZIP chứa ảnh |
 | PATCH | `/:imageId` | images.js:143 | Update split/status |
 | DELETE | `/:imageId` | images.js:153 | Delete image + xóa file vật lý |
+
+**[STEP-3.4]** `GET /:imageId` response nay trả thêm `annotationVersion: number` = `COALESCE(MAX(version), 0)` từ `annotation_history` của ảnh. Client dùng giá trị này làm `expectedVersion` khi gọi PUT annotations.
 
 ---
 
@@ -273,12 +275,21 @@ Roboflow - Copy/
 | Router options | Router({ mergeParams: true }) | CONFIRMED |
 | Imports | db, nanoid, **pruneAnnotationHistory** (từ db.js) | CONFIRMED |
 | Callers/Used-by | index.js (mounted /api/images/:imageId/annotations) | CONFIRMED |
-| Pattern | Replace-all: DELETE + bulk INSERT trong transaction; **[STEP-3.2]** thêm INSERT annotation_history snapshot + prune sau mỗi save | CONFIRMED |
-| Last verified | 2026-08-05 (STEP-3.2) | - |
+| Pattern | Replace-all: DELETE + bulk INSERT trong transaction; [STEP-3.2] INSERT snapshot vào annotation_history + prune; **[STEP-3.4] Optimistic locking: đọc currentVersion từ annotation_history TRƯỚC transaction, check với expectedVersion từ client body** | CONFIRMED |
+| Last verified | 2026-08-05 (STEP-3.4) | - |
 
-| Method | Path | File:Line | Mô tả |
+| Method | Path | Mô tả | Response |
 |---|---|---|---|
-| PUT | `/` | annotations.js:14 | Replace toàn bộ annotations; auto-update images.status; **INSERT snapshot vào annotation_history (version=MAX+1), gọi pruneAnnotationHistory** |
+| PUT | `/` | Replace toàn bộ annotations; optimistic lock check; INSERT snapshot annotation_history (version=MAX+1); pruneAnnotationHistory | `200 {annotations: Annotation[], annotationVersion: number}` hoặc `409 {error:'ANNOTATION_CONFLICT', serverVersion:N, message:string}` |
+
+**[STEP-3.4] Optimistic locking:**
+- Client gửi `expectedVersion` trong body (integer — version client đang cầm từ lần GET gần nhất).
+- Server đọc `COALESCE(MAX(version),0)` từ `annotation_history` TRƯỚC khi vào transaction.
+- Nếu `expectedVersion !== currentVersion` → **409 Conflict** (không lưu gì).
+- Nếu `expectedVersion` không gửi (undefined/null) → bỏ qua check (backward compat).
+- Nếu pass → save bình thường, version tăng lên `currentVersion + 1`.
+
+**Version concept:** "version của ảnh" = `MAX(version)` trong `annotation_history` (per-save, tăng mỗi lần PUT thành công). **KHÔNG phải** cột `annotations.version` per-row (cột đó chỉ là placeholder từ migration 3.1, chưa được dùng cho locking).
 
 **Quan trọng:** Không có GET riêng — annotations được trả cùng `GET /images/:imageId` (images.js:64).
 **Depth-1 callers:** index.js (mount), history.js (dùng chung DB nhưng không import annotations.js).
@@ -468,19 +479,22 @@ Lifecycle: `draft → in_review → approved` hoặc `→ rejected → (submit l
 |---|---|---|
 | Pattern | Thin fetch wrapper (`request<T>`) — không có state | CONFIRMED |
 | Callers/Used-by | ProjectsPage, ProjectDetailPage, AnnotatorPage | CONFIRMED |
-| Auth | Không có (no token/cookie) | CONFIRMED |
-| Last verified | 2026-08-04 | - |
+| Auth | JWT Bearer + httpOnly cookie (STEP-2.2) | CONFIRMED |
+| Last verified | 2026-08-05 (STEP-3.4) | - |
 
 **Hàm public:**
 ```
 listProjects, createProject, getProject, deleteProject
 listClasses, createClass, updateClass, deleteClass
 listImages, getImage, uploadImages, uploadZip, updateImage, deleteImage
-saveAnnotations
+saveAnnotations(imageId, annotations, expectedVersion?)   ← [STEP-3.4] thêm tham số expectedVersion
+  → trả { annotations: Annotation[], annotationVersion: number }  (thay vì Annotation[] cũ)
+  → throw Error('ANNOTATION_CONFLICT') nếu server trả 409
 exportUrl, getSplitPreview
 getStats
 listModels, uploadModel, deleteModel
 startAutoLabel, getAutoLabelJob
+submitReview, approveReview, rejectReview
 ```
 
 ---
@@ -490,9 +504,9 @@ startAutoLabel, getAutoLabelJob
 Các interface chính:
 - `Project` — id, name, description, created_at, image_count, labeled_count, class_count
 - `ClassLabel` — id, project_id, name, color, sort_order, hotkey
-- `ImageItem` — id, project_id, filename, original_name, width, height, split, status, created_at, class_ids[], **thumbnail_url?** (STEP-1.3)
+- `ImageItem` — id, project_id, filename, original_name, width, height, split, status, created_at, class_ids[], thumbnail_url? (STEP-1.3), review_status?, review_comment?, reviewed_by?, reviewed_at? (STEP-2.3)
 - `Annotation` — id, image_id, class_id, x, y, w, h, type, points
-- `ImageWithAnnotations` — ImageItem + annotations[]
+- `ImageWithAnnotations` — ImageItem + annotations[] + **annotationVersion: number** (STEP-3.4 — version dùng cho optimistic locking)
 - `ModelInfo` — id, project_id, filename, original_name, created_at
 - `AutoLabelJob` — status, total, done, created, failed, error, unmatchedClasses[]
 
@@ -503,13 +517,15 @@ Các interface chính:
 | Thuộc tính | Giá trị | Confidence |
 |---|---|---|
 | Callers/Used-by | App.tsx (route /projects/:pid/annotate/:iid) | CONFIRMED |
-| API calls | api.listClasses, api.listImages, api.getImage, api.saveAnnotations | CONFIRMED |
+| API calls | api.listClasses, api.listImages, api.getImage, api.saveAnnotations, api.submitReview, api.approveReview, api.rejectReview | CONFIRMED |
 | Autosave | debounce 600ms sau mỗi thay đổi box | CONFIRMED |
 | Tools | bbox (draw rect), quad (4-point OBB) | CONFIRMED |
-| Hotkeys | Arrow ← → navigate, Delete xóa box | INFERRED |
+| Hotkeys | Arrow ← → navigate, Delete xóa box | CONFIRMED |
 | State: boxes | Box[] (local) — sync lên server khi dirty | CONFIRMED |
 | State: undo | KHÔNG có undo/redo hiện tại | CONFIRMED |
-| Last verified | 2026-08-04 | - |
+| **[STEP-3.4] annotationVersionRef** | `useRef<number>(0)` — lưu version annotation hiện tại (từ `img.annotationVersion` khi load). Dùng làm `expectedVersion` khi gọi `saveAnnotations()`. Cập nhật thành `result.annotationVersion` sau mỗi save thành công. | CONFIRMED |
+| **[STEP-3.4] 409 handling** | `scheduleSave` catch `Error('ANNOTATION_CONFLICT')` → alert + reload image + cập nhật `annotationVersionRef`. Lỗi khác → trạng thái `dirty` để user retry. | CONFIRMED |
+| Last verified | 2026-08-05 (STEP-3.4) | - |
 
 ---
 
@@ -762,7 +778,7 @@ Các interface chính:
 
 | Method | Path | File:Line | Response |
 |---|---|---|---|
-| PUT | /api/images/:iid/annotations | annotations.js:14 | Annotation[] (đồng thời INSERT snapshot vào annotation_history) |
+| PUT | /api/images/:iid/annotations | annotations.js:14 | `200 {annotations: Annotation[], annotationVersion: number}` — [STEP-3.4] hoặc `409 {error:'ANNOTATION_CONFLICT', serverVersion:N, message:str}` khi conflict. Body: `{annotations, expectedVersion?}`. |
 
 ### Annotation History (STEP-3.2 MỚI)
 
@@ -967,6 +983,21 @@ Query params export: `format=yolo\|coco\|voc`, `splitMode=manual\|auto`, `trainR
 
 ---
 
+### Phase 3.4 — Optimistic locking annotation — ✅ HOÀN THÀNH
+
+**Files đã thay đổi (STEP-3.4):**
+- `server/src/routes/annotations.js` — PUT handler: đọc `currentVersion = COALESCE(MAX(version), 0)` từ `annotation_history` TRƯỚC transaction; if `expectedVersion` mismatch → 409; response đổi thành `{annotations, annotationVersion}`.
+- `server/src/routes/images.js` — GET `/:imageId` thêm `annotationVersion` vào response (query `annotation_history`).
+- `client/src/types.ts` — `ImageWithAnnotations` thêm `annotationVersion: number`.
+- `client/src/api.ts` — `saveAnnotations(imageId, annotations, expectedVersion?)` → `{annotations, annotationVersion}`.
+- `client/src/pages/AnnotatorPage.tsx` — `annotationVersionRef` ref tracking; `scheduleSave` gửi version, catch 409, reload image.
+- `tests/auth.test.js` — Row 18: 12 test case — conflict detection, backward compat, response shape. 113 passed, 0 failed.
+
+**Depth-1 callers của PUT annotations:** `client/src/api.ts → AnnotatorPage.tsx` (saveAnnotations). Không caller server-side nào bị break (history.js không gọi PUT annotations route).
+**Watch out cho Phase 4/5:** annotations.js PUT response đã thay đổi thành object — bất kỳ code nào gọi PUT và expect Annotation[] trực tiếp sẽ break. Hiện chỉ AnnotatorPage gọi và đã được cập nhật.
+
+---
+
 ### Phase 3.5 — Image done status
 
 **Files bị ảnh hưởng:**
@@ -1015,3 +1046,4 @@ Query params export: `format=yolo\|coco\|voc`, `splitMode=manual\|auto`, `trainR
 | 2026-08-05 | senior-developer (STEP-3.1) | Cập nhật §6 — cột `annotations.version`, bảng mới `annotation_history` (snapshot), `activity_log`; §9 Phase 3.1 DONE — verify row count trước/sau (0 mất dữ liệu, CTO condition #1 đạt) | (STEP-3.1) |
 | 2026-08-05 | senior-developer (STEP-3.2) | Thêm §3.14 history.js (MỚI), cập nhật §2 (routes/history.js), §3.1 (mount /api/images/:id history), §3.6 (annotations.js + pruneAnnotationHistory), §7 (Annotation History endpoints), §9 Phase 3.2 DONE — 93 test pass (0 fail, 0 skip) | a4c3519 |
 | 2026-08-05 | junior-developer (STEP-3.3) | Thêm §3.15 activity.js (MỚI), cập nhật §2 (routes/activity.js), §3.1 (mount /api/projects/:id/activity + activityRouter), §3.2 (db.js exports: logActivity), §3.9 (images.js gọi logActivity), §3.10 (export.js gọi logActivity), §9 Phase 3.3 DONE — 101 test pass (0 fail, 0 skip) | a0f01dc |
+| 2026-08-05 | senior-developer (STEP-3.4) | Cập nhật §3.5 (GET /:imageId trả thêm annotationVersion), §3.6 (annotations.js — optimistic locking: check expectedVersion trước transaction, PUT response đổi từ Annotation[] thành {annotations, annotationVersion}), §4.2 (api.ts — saveAnnotations thêm tham số expectedVersion), §4.3 (ImageWithAnnotations.annotationVersion), §4.4 (AnnotatorPage — annotationVersionRef, 409 handling), §7 (PUT annotations response 409), §9 Phase 3.4 DONE — 113 test pass (0 fail, 0 skip), tsc 0 lỗi | (STEP-3.4) |

@@ -2,8 +2,8 @@
 step: "5.2"
 plan: ../PLAN-MASTER.md
 agent: junior-developer
-status: todo
-completed_at:
+status: done
+completed_at: 2026-08-05 11:13
 deps: ["1.1"]
 ---
 
@@ -29,26 +29,36 @@ Thêm tính năng copy annotations từ ảnh trước trong danh sách sang ả
 
 ## Đã làm
 
-[Điền SAU khi hoàn thành]
+1. **AnnotatorPage.tsx** — thêm copy-label đầy đủ:
+   - State: `copyingLabels` (bool) — disable button và hiện "⏳ Đang copy..." trong khi chờ API.
+   - Derived value: `prevImageItem = images[currentIndex - 1] | null` — dùng để disable button và truyền id vào callback.
+   - `copyLabelsFromPrev` useCallback: gọi `api.getImage(projectId, prevImg.id)` lấy annotations ảnh trước; nếu ảnh hiện tại đã có box → `confirm()` xin phép; gọi `pushHistorySnapshot()` rồi merge copiedBoxes vào state; gọi `scheduleSave()`.
+   - Keyboard: Alt+C trong keyboard useEffect — đặt trước guard `!e.altKey` để không xung đột class hotkeys; thêm `copyLabelsFromPrev` vào deps array.
+   - Toolbar: nút "📋 Copy nhãn ảnh trước (Alt+C)" — disabled khi `!prevImageItem || prevImageItem.status === 'unlabeled' || copyingLabels`; opacity 0.45 khi disabled.
+   - Side panel help text: bổ sung dòng "Copy nhãn ảnh trước: Alt+C".
 
 ## Artifact
 
-[Điền SAU khi hoàn thành]
+- `client/src/pages/AnnotatorPage.tsx` — copy-label + keyboard Alt+C + toolbar button + help text
 
 ## Quyết định quan trọng
 
-[Điền SAU khi hoàn thành]
+1. **Dùng api.getImage thay vì endpoint mới**: `images[currentIndex-1]` đã có id trong state → gọi GET `/api/projects/:pid/images/:id` hiện có là đủ, không cần endpoint `prev-annotations` riêng. Đơn giản hơn, không thêm surface server.
+2. **Merge chứ không ghi đè**: box hiện tại được GIỮ NGUYÊN, copiedBoxes append thêm vào. Nếu ảnh đã có box → confirm() hỏi trước (không tự ghi đè).
+3. **ID mới cho mỗi box copy**: prefix `copy_` + timestamp + random để tránh xung đột với ID gốc từ ảnh trước trong DB.
+4. **pushHistorySnapshot() trước merge**: đảm bảo Ctrl+Z hoàn tác được toàn bộ thao tác copy.
+5. **Disable dựa trên `prevImageItem.status`**: nếu `status === 'unlabeled'` → ảnh trước chưa có annotation → disable sớm, không cần gọi API để kiểm tra.
 
 ## Handoff Payload — bước sau đọc phần này
 
-- do_not_redo: Không có
-- watch_out: Không có
-- next_inputs: Không có
+- do_not_redo: Không bind Alt+C thêm lần nữa. Không thêm refs/state copyingLabels/prevImageItem thêm.
+- watch_out: Phím đã dùng trong AnnotatorPage — Ctrl+Z/Y/Shift+Z (undo/redo), ArrowLeft/Right (nav), Delete/Backspace (xoá/undo point), Escape (cancel draw), D (done toggle), Space (pan), 1-9 (class), Alt+C (copy label bước này). Bước 5.3/5.4/5.5 tránh trùng tất cả các phím trên. Alt là namespace còn trống (chỉ Alt+C đã dùng). Ctrl+phím khác ngoài Z/Y cũng còn trống.
+- next_inputs: File `client/src/pages/AnnotatorPage.tsx` tại commit cd8c494. Keyboard useEffect deps array hiện tại: `[selectedId, deleteSelected, classes, goTo, drawingPoints, cancelDrawing, undoLastPoint, assignClassToSelected, image, handleMarkDone, handleUnmarkDone, undo, redo, copyLabelsFromPrev]`.
 
 ## Commit
 
-- Hash: [điền sau khi commit]
-- Đã push: [có/không]
+- Hash: cd8c494
+- Đã push: có — branch `Improve`
 
 ---
 **Status icons:** ⬜ Todo | 🔄 In Progress | ✅ Done | 🛑 Blocked | ⏭️ Skipped

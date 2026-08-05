@@ -24,6 +24,8 @@ type Handle = 'nw' | 'ne' | 'sw' | 'se' | number | null;
 
 const HANDLE_SIZE = 8;
 const DRAWING_ID = '__drawing__';
+/** STEP-5.1: Undo stack size limit */
+const MAX_UNDO = 50;
 
 export default function AnnotatorPage() {
   const { projectId, imageId } = useParams<{ projectId: string; imageId: string }>();
@@ -66,6 +68,22 @@ export default function AnnotatorPage() {
   const [prefillCount, setPrefillCount] = useState(0);
   const pendingScrollRef = useRef<{ left: number; top: number } | null>(null);
 
+  // STEP-5.1: Undo/Redo history (client-side only, cleared on save success / image change)
+  const undoStackRef = useRef<Box[][]>([]);
+  const redoStackRef = useRef<Box[][]>([]);
+  /** Mirror of boxes state, updated synchronously via useEffect — used for snapshot capture. */
+  const boxesRef = useRef<Box[]>([]);
+  /** Snapshot captured at drag start (mousedown) for move/resize/draw — pushed to undoStack on drag end. */
+  const preDragSnapshotRef = useRef<Box[] | null>(null);
+  /** Tracks the last drawn box dimensions synchronously inside handleDragMove for draw mode. */
+  const lastDrawnSizeRef = useRef<{ w: number; h: number } | null>(null);
+  /** Sizes for disabling Undo/Redo buttons in toolbar (re-render trigger). */
+  const [undoSize, setUndoSize] = useState(0);
+  const [redoSize, setRedoSize] = useState(0);
+
+  /** Keep boxesRef in sync with boxes state (runs after each render). */
+  useEffect(() => { boxesRef.current = boxes; }, [boxes]);
+
   useEffect(() => {
     if (!projectId) return;
     api.listClasses(projectId).then((cs) => {
@@ -82,6 +100,11 @@ export default function AnnotatorPage() {
     setImgEl(null);
     setPrefillLoading(false);
     setPrefillCount(0);
+    // STEP-5.1: Clear undo/redo history when navigating to a new image
+    undoStackRef.current = [];
+    redoStackRef.current = [];
+    setUndoSize(0);
+    setRedoSize(0);
 
     api.getImage(projectId, imageId).then((img) => {
       if (cancelled) return;
@@ -222,6 +245,11 @@ export default function AnnotatorPage() {
         // Cập nhật version sau khi save thành công
         annotationVersionRef.current = result.annotationVersion;
         setSaveState('saved');
+        // STEP-5.1: Clear undo/redo history after successful save — undo không hoạt động sau khi đã lưu
+        undoStackRef.current = [];
+        redoStackRef.current = [];
+        setUndoSize(0);
+        setRedoSize(0);
         setImages((imgs) => imgs.map((i) => (i.id === imageId ? { ...i, status: nextBoxes.length ? 'labeled' : 'unlabeled' } : i)));
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -235,6 +263,11 @@ export default function AnnotatorPage() {
               setBoxes(img.annotations.map((a: Annotation) => annotationToBox(a)));
               annotationVersionRef.current = img.annotationVersion ?? 0;
               setSaveState('saved');
+              // Also clear history on conflict reload
+              undoStackRef.current = [];
+              redoStackRef.current = [];
+              setUndoSize(0);
+              setRedoSize(0);
             }).catch(() => {});
           }
         } else {
@@ -246,7 +279,43 @@ export default function AnnotatorPage() {
     }, 600);
   }, [imageId, projectId]);
 
+  // STEP-5.1: Push current boxes as undo snapshot before a user-initiated change.
+  // Mutates undoStackRef/redoStackRef directly (refs, not state) — safe to call anywhere.
+  const pushHistorySnapshot = () => {
+    undoStackRef.current.push(boxesRef.current.map(cloneBox));
+    if (undoStackRef.current.length > MAX_UNDO) undoStackRef.current.shift();
+    redoStackRef.current = [];
+    setUndoSize(undoStackRef.current.length);
+    setRedoSize(0);
+  };
+
+  // STEP-5.1: Undo — restore previous snapshot, push current to redo stack
+  const undo = useCallback(() => {
+    if (undoStackRef.current.length === 0) return;
+    const snapshot = undoStackRef.current.pop()!;
+    redoStackRef.current.push(boxesRef.current.map(cloneBox));
+    setBoxes(snapshot);
+    setUndoSize(undoStackRef.current.length);
+    setRedoSize(redoStackRef.current.length);
+    scheduleSave(snapshot);
+    setPrefillCount(0);
+  }, [scheduleSave]);
+
+  // STEP-5.1: Redo — reapply a snapshot that was undone
+  const redo = useCallback(() => {
+    if (redoStackRef.current.length === 0) return;
+    const snapshot = redoStackRef.current.pop()!;
+    undoStackRef.current.push(boxesRef.current.map(cloneBox));
+    setBoxes(snapshot);
+    setUndoSize(undoStackRef.current.length);
+    setRedoSize(redoStackRef.current.length);
+    scheduleSave(snapshot);
+    setPrefillCount(0);
+  }, [scheduleSave]);
+
   const updateBoxes = (updater: (prev: Box[]) => Box[]) => {
+    // STEP-5.1: Push snapshot before every user-initiated box change
+    pushHistorySnapshot();
     // STEP-4.2: user bắt đầu chỉnh sửa → dismiss prefill banner
     setPrefillCount(0);
     setBoxes((prev) => {
@@ -505,6 +574,8 @@ export default function AnnotatorPage() {
       if (sel) {
         const handle = hitTestHandle(sel, x, y);
         if (handle !== null) {
+          // STEP-5.1: Capture pre-resize snapshot for undo
+          preDragSnapshotRef.current = boxesRef.current.map(cloneBox);
           dragRef.current = { mode: 'resize', handle, startX: x, startY: y, orig: cloneBox(sel) };
           attachWindowDragListeners();
           return;
@@ -514,6 +585,8 @@ export default function AnnotatorPage() {
     const hit = hitTestBox(x, y);
     if (hit) {
       setSelectedId(hit.id);
+      // STEP-5.1: Capture pre-move snapshot for undo
+      preDragSnapshotRef.current = boxesRef.current.map(cloneBox);
       dragRef.current = { mode: 'move', handle: null, startX: x, startY: y, orig: cloneBox(hit) };
       attachWindowDragListeners();
       return;
@@ -524,6 +597,9 @@ export default function AnnotatorPage() {
       setDrawingPoints([{ x, y }]);
       return;
     }
+    // STEP-5.1: Capture pre-draw snapshot and reset draw tracker for undo
+    preDragSnapshotRef.current = boxesRef.current.map(cloneBox);
+    lastDrawnSizeRef.current = null;
     dragRef.current = { mode: 'draw', handle: null, startX: x, startY: y };
     attachWindowDragListeners();
   };
@@ -546,6 +622,8 @@ export default function AnnotatorPage() {
     if (drag.mode === 'draw') {
       const x0 = Math.min(drag.startX, x), y0 = Math.min(drag.startY, y);
       const w = Math.abs(x - drag.startX), h = Math.abs(y - drag.startY);
+      // STEP-5.1: Track drawn dimensions synchronously for handleDragUp to use
+      lastDrawnSizeRef.current = { w, h };
       setBoxes((prev) => {
         const rest = prev.filter((b) => b.id !== DRAWING_ID);
         return [...rest, { id: DRAWING_ID, class_id: activeClassId, type: 'bbox', x: x0, y: y0, w, h }];
@@ -584,6 +662,11 @@ export default function AnnotatorPage() {
   const handleDragUp = () => {
     const drag = dragRef.current;
     if (drag.mode === 'draw') {
+      // STEP-5.1: Use lastDrawnSizeRef (updated synchronously in handleDragMove)
+      // to determine validity — avoids boxesRef staleness between renders.
+      const lastSize = lastDrawnSizeRef.current;
+      const willFinalize = lastSize && lastSize.w > 3 && lastSize.h > 3;
+
       setBoxes((prev) => {
         const drawn = prev.find((b) => b.id === DRAWING_ID);
         const rest = prev.filter((b) => b.id !== DRAWING_ID);
@@ -596,7 +679,27 @@ export default function AnnotatorPage() {
         }
         return rest;
       });
+
+      // STEP-5.1: Only push history entry when a valid box was actually drawn
+      if (willFinalize && preDragSnapshotRef.current) {
+        undoStackRef.current.push(preDragSnapshotRef.current);
+        if (undoStackRef.current.length > MAX_UNDO) undoStackRef.current.shift();
+        redoStackRef.current = [];
+        setUndoSize(undoStackRef.current.length);
+        setRedoSize(0);
+      }
+      preDragSnapshotRef.current = null;
+      lastDrawnSizeRef.current = null;
     } else if (drag.mode === 'move' || drag.mode === 'resize') {
+      // STEP-5.1: Push pre-drag snapshot for move/resize operations
+      if (preDragSnapshotRef.current) {
+        undoStackRef.current.push(preDragSnapshotRef.current);
+        if (undoStackRef.current.length > MAX_UNDO) undoStackRef.current.shift();
+        redoStackRef.current = [];
+        setUndoSize(undoStackRef.current.length);
+        setRedoSize(0);
+      }
+      preDragSnapshotRef.current = null;
       setBoxes((prev) => { scheduleSave(prev); return prev; });
     }
     dragRef.current = { mode: 'none', handle: null, startX: 0, startY: 0 };
@@ -626,6 +729,31 @@ export default function AnnotatorPage() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement) return;
+
+      // STEP-5.1: Ctrl+Z → undo last point (if drawing quad) OR undo operation
+      // Ctrl+Shift+Z or Ctrl+Y → redo
+      if (e.ctrlKey || e.metaKey) {
+        const key = e.key.toLowerCase();
+        if (key === 'z') {
+          e.preventDefault();
+          if (e.shiftKey) {
+            redo();
+          } else if (drawingPoints.length > 0) {
+            // When actively placing a quad, Ctrl+Z removes the last placed point
+            // (same behavior as Delete/Backspace + right-click in this mode)
+            undoLastPoint();
+          } else {
+            undo();
+          }
+          return;
+        }
+        if (key === 'y') {
+          e.preventDefault();
+          redo();
+          return;
+        }
+      }
+
       if (e.key === 'Escape' && drawingPoints.length > 0) { cancelDrawing(); return; }
       if ((e.key === 'Delete' || e.key === 'Backspace') && drawingPoints.length > 0) {
         e.preventDefault();
@@ -657,7 +785,7 @@ export default function AnnotatorPage() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selectedId, deleteSelected, classes, goTo, drawingPoints, cancelDrawing, undoLastPoint, assignClassToSelected, image, handleMarkDone, handleUnmarkDone]);
+  }, [selectedId, deleteSelected, classes, goTo, drawingPoints, cancelDrawing, undoLastPoint, assignClassToSelected, image, handleMarkDone, handleUnmarkDone, undo, redo]);
 
   if (!image) return <p>Đang tải ảnh...</p>;
 
@@ -676,6 +804,28 @@ export default function AnnotatorPage() {
           <button className={`tool-btn ${tool === 'quad' ? 'active' : ''}`}
             onClick={() => setTool('quad')} title="Chấm 4 điểm — phù hợp cho biển số bị xiên/nghiêng">
             ◈ Chấm 4 điểm (Quad)
+          </button>
+        </div>
+
+        {/* STEP-5.1: Undo/Redo buttons */}
+        <div style={{ display: 'flex', gap: 4 }}>
+          <button
+            className="btn btn-outline"
+            onClick={undo}
+            disabled={undoSize === 0}
+            title="Hoàn tác thao tác vừa rồi (Ctrl+Z)"
+            style={{ fontSize: 12, padding: '2px 8px', opacity: undoSize === 0 ? 0.45 : 1 }}
+          >
+            ↩ Hoàn tác{undoSize > 0 ? ` (${undoSize})` : ''}
+          </button>
+          <button
+            className="btn btn-outline"
+            onClick={redo}
+            disabled={redoSize === 0}
+            title="Làm lại thao tác vừa hoàn tác (Ctrl+Y / Ctrl+Shift+Z)"
+            style={{ fontSize: 12, padding: '2px 8px', opacity: redoSize === 0 ? 0.45 : 1 }}
+          >
+            ↪ Làm lại{redoSize > 0 ? ` (${redoSize})` : ''}
           </button>
         </div>
 
@@ -811,7 +961,8 @@ export default function AnnotatorPage() {
             <b>Box:</b> kéo chuột để vẽ khung chữ nhật.<br />
             <b>Quad:</b> bấm lần lượt 4 điểm quanh vật xiên/nghiêng.<br />
             Chọn khung để di chuyển / kéo từng điểm góc, hoặc bấm nhãn khác/phím số để đổi nhãn. Delete để xoá khung đã chọn.<br />
-            <b>Zoom:</b> lăn chuột hoặc nút +/− trên ảnh. <b>Pan:</b> giữ phím Space rồi kéo (hoặc kéo bằng chuột giữa).
+            <b>Zoom:</b> lăn chuột hoặc nút +/− trên ảnh. <b>Pan:</b> giữ phím Space rồi kéo (hoặc kéo bằng chuột giữa).<br />
+            <b>Hoàn tác:</b> Ctrl+Z | <b>Làm lại:</b> Ctrl+Y / Ctrl+Shift+Z
           </p>
         </div>
 

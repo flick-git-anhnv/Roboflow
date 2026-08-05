@@ -70,6 +70,12 @@ export default function AnnotatorPage() {
   const [copyingLabels, setCopyingLabels] = useState(false);
   const pendingScrollRef = useRef<{ left: number; top: number } | null>(null);
 
+  /** STEP-5.4: Filmstrip — dải ảnh thumbnail cuộn ngang dưới canvas. */
+  const filmstripRef = useRef<HTMLDivElement>(null);
+  const [showFilmstrip, setShowFilmstrip] = useState<boolean>(() => {
+    try { return localStorage.getItem('filmstrip_visible') !== 'false'; } catch { return true; }
+  });
+
   // STEP-5.1: Undo/Redo history (client-side only, cleared on save success / image change)
   const undoStackRef = useRef<Box[][]>([]);
   const redoStackRef = useRef<Box[][]>([]);
@@ -85,6 +91,13 @@ export default function AnnotatorPage() {
 
   /** Keep boxesRef in sync with boxes state (runs after each render). */
   useEffect(() => { boxesRef.current = boxes; }, [boxes]);
+
+  /** STEP-5.4: Auto-scroll filmstrip để highlight ảnh đang mở khi imageId thay đổi. */
+  useEffect(() => {
+    if (!showFilmstrip || !filmstripRef.current) return;
+    const el = filmstripRef.current.querySelector(`[data-id="${imageId}"]`) as HTMLElement | null;
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+  }, [imageId, showFilmstrip]);
 
   useEffect(() => {
     if (!projectId) return;
@@ -156,6 +169,20 @@ export default function AnnotatorPage() {
     const next = images[currentIndex + delta];
     if (next) navigate(`/projects/${projectId}/annotate/${next.id}`);
   }, [images, currentIndex, navigate, projectId]);
+
+  /** STEP-5.4: Nhảy thẳng đến ảnh theo ID — dùng cho filmstrip click. */
+  const goToImageId = useCallback((id: string) => {
+    navigate(`/projects/${projectId}/annotate/${id}`);
+  }, [navigate, projectId]);
+
+  /** STEP-5.4: Toggle hiện/ẩn filmstrip, lưu trạng thái vào localStorage. */
+  const toggleFilmstrip = useCallback(() => {
+    setShowFilmstrip((prev) => {
+      const next = !prev;
+      try { localStorage.setItem('filmstrip_visible', String(next)); } catch {}
+      return next;
+    });
+  }, []);
 
   const classById = useMemo(() => new Map(classes.map((c) => [c.id, c])), [classes]);
 
@@ -910,6 +937,16 @@ export default function AnnotatorPage() {
           <button className="btn btn-outline" onClick={() => setZoom(1)} disabled={zoom === 1} title="Về vừa khung hình">⤢ Fit</button>
         </div>
 
+        {/* STEP-5.4: Filmstrip toggle */}
+        <button
+          className="btn btn-outline"
+          onClick={toggleFilmstrip}
+          title={showFilmstrip ? 'Ẩn dải ảnh (filmstrip)' : 'Hiện dải ảnh (filmstrip)'}
+          style={{ fontSize: 12, padding: '2px 8px' }}
+        >
+          {showFilmstrip ? '▼ Dải ảnh' : '▲ Dải ảnh'}
+        </button>
+
         <span style={{ fontSize: 13, color: '#666' }}>{currentIndex + 1} / {images.length} — {image.original_name}</span>
         <span className={`save-status ${saveState}`}>
           {saveState === 'saved' ? '✓ Đã lưu' : saveState === 'saving' ? 'Đang lưu...' : 'Chưa lưu...'}
@@ -1006,7 +1043,10 @@ export default function AnnotatorPage() {
         </div>
       )}
 
-      <div className="annotator-layout">
+      {/* STEP-5.4: height thu hẹp khi filmstrip hiện để không overflow */}
+      <div className="annotator-layout"
+        style={showFilmstrip ? { height: 'calc(100vh - 246px)' } : undefined}
+      >
         <div className="side-panel" style={{ position: 'static' }}>
           <div>
             <h4>{selectedId ? 'Đổi nhãn khung đã chọn' : 'Chọn nhãn (bấm phím tắt)'}</h4>
@@ -1069,6 +1109,46 @@ export default function AnnotatorPage() {
           </div>
         </div>
       </div>
+
+      {/* STEP-5.4: Filmstrip — dải ảnh thumbnail cuộn ngang.
+          - Click thumbnail → nhảy sang ảnh đó (goToImageId).
+          - Highlight ảnh đang mở bằng viền cam #F05922.
+          - Badge màu ở dưới mỗi thumb: trạng thái labeled/done/review.
+          - Lazy load qua browser native (loading="lazy") + thumbnail endpoint STEP-1.3.
+          - Ẩn/hiện bằng nút toggle, trạng thái persist localStorage. */}
+      {showFilmstrip && (
+        <div className="filmstrip" ref={filmstripRef}>
+          {images.map((img) => {
+            const isActive = img.id === imageId;
+            // Badge priority: review_status > completed_at > status (labeled/unlabeled)
+            let badgeBg = '#555';
+            let badgeText = 'Chưa gán';
+            if (img.status === 'labeled') { badgeBg = '#251C53'; badgeText = 'Đã gán'; }
+            if (img.completed_at) { badgeBg = '#2e7d32'; badgeText = '✓ Xong'; }
+            if (img.review_status === 'in_review') { badgeBg = '#4A3F8C'; badgeText = 'Chờ duyệt'; }
+            if (img.review_status === 'approved') { badgeBg = '#2e7d32'; badgeText = '✓ Duyệt'; }
+            if (img.review_status === 'rejected') { badgeBg = '#F05922'; badgeText = 'Từ chối'; }
+            return (
+              <div
+                key={img.id}
+                data-id={img.id}
+                className={`filmstrip-thumb${isActive ? ' active' : ''}`}
+                onClick={() => goToImageId(img.id)}
+                title={img.original_name}
+              >
+                <img
+                  src={`/api/images/${img.id}/thumb?size=80`}
+                  alt={img.original_name}
+                  loading="lazy"
+                  width={80}
+                  height={80}
+                />
+                <span className="filmstrip-badge" style={{ background: badgeBg }}>{badgeText}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import type { Annotation, AutoLabelJob, ClassLabel, ImageItem, ImageWithAnnotations, ModelInfo, Project, SuggestedBox, User } from './types';
+import type { Annotation, AutoLabelJob, ClassLabel, ImageItem, ImageWithAnnotations, ModelInfo, Project, SuggestedBox, User, ValidateResult } from './types';
 
 // ── Token helpers ──────────────────────────────────────────────────────────────
 // Token stored as httpOnly cookie (server-set) AND cached in sessionStorage for
@@ -215,6 +215,11 @@ export const api = {
       method: 'DELETE',
       body: JSON.stringify({ imageIds }),
     }),
+
+  // ── Dataset validation (STEP-6.3) ────────────────────────────────────────────
+  /** Kiểm tra chất lượng dataset: trùng lặp ảnh, annotation lỗi tọa độ, class không dùng. */
+  validateDataset: (projectId: string) =>
+    request<ValidateResult>(`/api/projects/${projectId}/validate`),
 
   // ── Review workflow (STEP-2.3) ───────────────────────────────────────────────
   submitReview: (imageId: string) =>

@@ -163,8 +163,9 @@ Roboflow - Copy/
 | **[STEP-3.2]** History router | import + mount `routes/history.js` tại `/api/images/:imageId` | CONFIRMED |
 | **[STEP-3.3]** Activity router | import + mount `routes/activity.js` tại `/api/projects/:projectId/activity` | CONFIRMED |
 | **[STEP-4.2]** Prefill router | import + mount `routes/prefill.js` tại `/api/projects/:projectId` | CONFIRMED |
+| **[STEP-6.3]** Validate router | import + mount `routes/validate.js` tại `/api/projects/:projectId` | CONFIRMED |
 | Env vars đọc | `PORT`, `PYTHON_BIN`, `INFERENCE_PORT`, `USE_LEGACY_INFER` | CONFIRMED |
-| Last verified | 2026-08-05 (STEP-4.2) | - |
+| Last verified | 2026-08-05 (STEP-6.3) | - |
 
 **Route mounting:**
 ```
@@ -182,6 +183,7 @@ Roboflow - Copy/
 /api/images/:imageId                  → routes/history.js     [STEP-3.2 MỚI]
 /api/projects/:projectId/activity     → routes/activity.js    [STEP-3.3 MỚI]
 /api/projects/:projectId              → routes/prefill.js     [STEP-4.2 MỚI]
+/api/projects/:projectId              → routes/validate.js    [STEP-6.3 MỚI]
 ```
 
 ---
@@ -508,6 +510,33 @@ Lifecycle: `draft → in_review → approved` hoặc `→ rejected → (submit l
 - `400 INVALID_MODEL_ID` — PATCH body thiếu/sai kiểu
 - `503 INFERENCE_NOT_READY` — service inference không phản hồi (cache miss, non-legacy mode)
 - `503 INFERENCE_UNAVAILABLE_LEGACY` — legacy mode, không gọi inference được
+
+---
+
+### 3.17 `server/src/routes/validate.js` — Dataset Validation (STEP-6.3 MỚI)
+
+| Thuộc tính | Giá trị | Confidence |
+|---|---|---|
+| Router options | Router({ mergeParams: true }) | CONFIRMED |
+| Imports | db, UPLOAD_DIR (db.js), node:crypto (createHash), node:fs, node:path | CONFIRMED |
+| Callers/Used-by | index.js (mounted `/api/projects/:projectId`) | CONFIRMED |
+| Last verified | 2026-08-05 (STEP-6.3) | - |
+
+| Method | Path | Role required | Mô tả |
+|---|---|---|---|
+| GET | `/validate` | authenticated (any role) | Kiểm tra chất lượng dataset: duplicate ảnh (MD5 hash), annotation lỗi tọa độ, class không dùng |
+
+**Response shape:**
+```json
+{
+  "duplicates": [{ "hash": "md5hex", "imageIds": ["id1", "id2"] }],
+  "invalidAnnotations": [{ "id": "annId", "imageId": "imgId", "reason": "x + w (5) > image.width (1)" }],
+  "unusedClasses": [{ "id": "classId", "name": "className" }]
+}
+```
+
+**Logic kiểm tra annotation lỗi:** `w <= 0`, `h <= 0`, `x < 0`, `y < 0`, `x + w > image.width`, `y + h > image.height`.
+**MD5 hash:** đọc nội dung file vật lý tại `UPLOAD_DIR/<projectId>/<filename>` bằng `crypto.createHash('md5')`.
 
 ---
 
@@ -1171,3 +1200,4 @@ Query params export: `format=yolo\|coco\|voc`, `splitMode=manual\|auto`, `trainR
 | 2026-08-05 | senior-developer (STEP-4.1) | Thêm bảng `detect_cache` (§6), route `DELETE /cache` (§3.10/§7), cache raw detections theo (image_id, model_id) trong `autolabel.js`, `inference_service.py` trả thêm `conf`, §9 Phase 4.1 DONE — 133 test pass (0 fail, 0 skip) | ac61d98→(STEP-4.1) |
 | 2026-08-05 | junior-developer (STEP-5.3) | Cập nhật §3.5 (images.js — 2 route MỚI PATCH /batch + DELETE /batch), §7 (Images API table), §4.2 (api.ts — batchUpdateImages, batchDeleteImages), §4.4 (ProjectDetailPage — selectedIds state, toggleSelect, batchChangeSplit, batchDelete, batch toolbar UI, checkbox mỗi tile), tests Row 22 (16 test case). STEP-5.3 DONE — 162 test pass (0 fail, 0 skip), tsc 0 lỗi | (STEP-5.3) |
 | 2026-08-05 | junior-developer (STEP-6.1) | Cập nhật §3.9 (models.js — PATCH /:modelId MỚI), §6 (bảng models — 3 cột mới notes/map_score/version_label + m009), §7 (Models API PATCH), §4.2 (api.ts — updateModel), §4.3 (ModelInfo thêm 3 field), §4.5 (ProjectDetailPage — sortedModels, bestModelId, inline edit, badges), §9 Phase 6.1 DONE — 175 test pass (0 fail, 0 skip), tsc 0 lỗi | (STEP-6.1) |
+| 2026-08-05 | junior-developer (STEP-6.3) | Thêm §3.17 validate.js (MỚI), cập nhật §3.1 (mount /api/projects/:id validate), §4.2 (api.ts — validateDataset), §4.3 (ValidateResult types), §4.5 (ProjectDetailPage — button + ValidateModal), thêm component ValidateModal.tsx, §9 Phase 6 HOÀN THÀNH — 193 test pass (0 fail, 0 skip), tsc 0 lỗi | (STEP-6.3) |

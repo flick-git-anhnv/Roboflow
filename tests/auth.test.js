@@ -26,6 +26,8 @@
  *  Row 22: Batch operations (STEP-5.3) → unauthenticated 401, authenticated 200
  *  Row 23: Model metadata PATCH (STEP-6.1) → unauth 401, annotator 403, reviewer/admin 200,
  *          invalid map_score 400, nonexistent 404, empty body 400
+ *  Row 24: Dataset validation (STEP-6.3) → unauth 401, authenticated (any role) 200;
+ *          verify duplicate detection, invalid annotation coords, unused class reporting
  *
  * Security warning tests (ADR §6.3):
  *  W1: Same error message for wrong username vs wrong password
@@ -1128,6 +1130,137 @@ async function runTests() {
 
       // Cleanup: xoá model sau khi test xong
       await del(`/api/projects/${PID}/models/${META_MID}`, adminToken);
+    }
+  }
+
+  // ── Row 24: Dataset validation (STEP-6.3) ─────────────────────────────────
+  // GET /api/projects/:id/validate
+  //   unauthenticated → 401
+  //   authenticated (any role) → 200 với đúng 3 mục
+  //   Setup: upload 2 ảnh GIỐNG NHAU (cùng bytes → cùng MD5),
+  //          save 1 annotation lỗi tọa độ (x+w > image.width),
+  //          tạo 1 class mới không có annotation nào.
+  console.log('\n── Row 24: Dataset validation (STEP-6.3) ──');
+  {
+    // Setup: tạo project riêng để tránh nhiễu dữ liệu từ các Row trước
+    const v24ProjRes = await post('/api/projects', { name: 'validate-test-project', description: '' }, adminToken);
+    ok('Row24 setup: tạo project validate', v24ProjRes.status === 201, `got ${v24ProjRes.status}`);
+    const v24Proj = v24ProjRes.status === 201 ? await v24ProjRes.json() : null;
+    const V24_PID = v24Proj?.id;
+
+    if (!V24_PID) {
+      skip('Row24: tất cả tests', 'Không tạo được project');
+    } else {
+      // 1. Unauthenticated → 401
+      const validateUnauth = await get(`/api/projects/${V24_PID}/validate`, null);
+      ok('Row24: GET /validate unauthenticated → 401', validateUnauth.status === 401,
+        `got ${validateUnauth.status}`);
+
+      // 2. Upload 2 ảnh GIỐNG NHAU (cùng bytes → cùng MD5 → duplicate)
+      const img1Res = await uploadImage(V24_PID, adminToken);
+      const img2Res = await uploadImage(V24_PID, adminToken);
+      ok('Row24 setup: upload 2 ảnh giống nhau → 201',
+        img1Res.status === 201 && img2Res.status === 201,
+        `got ${img1Res.status}, ${img2Res.status}`);
+      const img1Data = img1Res.status === 201 ? await img1Res.json() : [];
+      const img2Data = img2Res.status === 201 ? await img2Res.json() : [];
+      const dupImg1 = img1Data[0]?.id;
+      const dupImg2 = img2Data[0]?.id;
+
+      // 3. Tạo class mới để có annotation hợp lệ
+      const classRes = await post(`/api/projects/${V24_PID}/classes`, { name: 'car', color: '#FF0000' }, adminToken);
+      ok('Row24 setup: tạo class car', classRes.status === 201, `got ${classRes.status}`);
+      const classData = classRes.status === 201 ? await classRes.json() : null;
+      const validClassId = classData?.id;
+
+      // 4. Tạo class thứ 2 sẽ không được dùng (unused class)
+      const unusedClassRes = await post(`/api/projects/${V24_PID}/classes`, { name: 'unused_class', color: '#00FF00' }, adminToken);
+      ok('Row24 setup: tạo class không dùng', unusedClassRes.status === 201, `got ${unusedClassRes.status}`);
+      const unusedClassData = unusedClassRes.status === 201 ? await unusedClassRes.json() : null;
+      const unusedClassId = unusedClassData?.id;
+
+      // 5. Save annotation lỗi tọa độ vào img1:
+      //    TINY_PNG là 1×1 pixel → annotation x=0, y=0, w=5, h=5 → x+w=5 > width=1 (lỗi)
+      if (dupImg1 && validClassId) {
+        const saveInvalidRes = await put(
+          `/api/images/${dupImg1}/annotations`,
+          { annotations: [{ class_id: validClassId, x: 0, y: 0, w: 5, h: 5, type: 'bbox', points: null }] },
+          adminToken,
+        );
+        ok('Row24 setup: save annotation lỗi tọa độ → 200', saveInvalidRes.status === 200,
+          `got ${saveInvalidRes.status}`);
+      }
+
+      // 6. GET /validate — annotator role → 200 với response đúng
+      const validateRes = await get(`/api/projects/${V24_PID}/validate`, annotatorToken);
+      ok('Row24: GET /validate annotator → 200', validateRes.status === 200,
+        `got ${validateRes.status}`);
+
+      if (validateRes.status === 200) {
+        const vData = await validateRes.json();
+
+        // Kiểm tra cấu trúc response
+        ok('Row24: response có trường duplicates (mảng)',
+          Array.isArray(vData.duplicates),
+          `duplicates type=${typeof vData.duplicates}`);
+        ok('Row24: response có trường invalidAnnotations (mảng)',
+          Array.isArray(vData.invalidAnnotations),
+          `invalidAnnotations type=${typeof vData.invalidAnnotations}`);
+        ok('Row24: response có trường unusedClasses (mảng)',
+          Array.isArray(vData.unusedClasses),
+          `unusedClasses type=${typeof vData.unusedClasses}`);
+
+        // Kiểm tra duplicate: 2 ảnh cùng bytes → phải có ít nhất 1 nhóm duplicate
+        if (dupImg1 && dupImg2) {
+          const dupGroup = vData.duplicates.find(
+            (d) => d.imageIds.includes(dupImg1) && d.imageIds.includes(dupImg2)
+          );
+          ok('Row24: phát hiện 2 ảnh trùng lặp (cùng hash)',
+            !!dupGroup,
+            `duplicates=${JSON.stringify(vData.duplicates)}`);
+          ok('Row24: duplicate group có hash string',
+            dupGroup ? typeof dupGroup.hash === 'string' && dupGroup.hash.length === 32 : false,
+            `hash=${dupGroup?.hash}`);
+        }
+
+        // Kiểm tra annotation lỗi: phải có ít nhất 1 annotation invalid
+        const hasInvalidAnn = vData.invalidAnnotations.length > 0;
+        ok('Row24: phát hiện annotation lỗi tọa độ (x+w > image.width)',
+          hasInvalidAnn,
+          `invalidAnnotations.length=${vData.invalidAnnotations.length}`);
+        if (hasInvalidAnn) {
+          const firstInvalid = vData.invalidAnnotations[0];
+          ok('Row24: invalid annotation có trường id, imageId, reason',
+            typeof firstInvalid.id === 'string' &&
+            typeof firstInvalid.imageId === 'string' &&
+            typeof firstInvalid.reason === 'string',
+            `id=${firstInvalid.id}, imageId=${firstInvalid.imageId}, reason=${firstInvalid.reason}`);
+        }
+
+        // Kiểm tra unused class: unusedClassId không có annotation nào → phải xuất hiện
+        if (unusedClassId) {
+          const foundUnused = vData.unusedClasses.find((c) => c.id === unusedClassId);
+          ok('Row24: phát hiện class không dùng',
+            !!foundUnused,
+            `unusedClasses=${JSON.stringify(vData.unusedClasses)}`);
+          ok('Row24: unused class có trường id, name',
+            foundUnused ? typeof foundUnused.id === 'string' && typeof foundUnused.name === 'string' : false,
+            `id=${foundUnused?.id}, name=${foundUnused?.name}`);
+        }
+      }
+
+      // 7. GET /validate — reviewer cũng được 200
+      const validateReviewer = await get(`/api/projects/${V24_PID}/validate`, reviewerToken);
+      ok('Row24: GET /validate reviewer → 200', validateReviewer.status === 200,
+        `got ${validateReviewer.status}`);
+
+      // 8. GET /validate project không tồn tại → 404
+      const validateNotFound = await get('/api/projects/nonexistent-project-id/validate', adminToken);
+      ok('Row24: GET /validate nonexistent project → 404', validateNotFound.status === 404,
+        `got ${validateNotFound.status}`);
+
+      // Cleanup: xoá project validate-test
+      await del(`/api/projects/${V24_PID}`, adminToken);
     }
   }
 

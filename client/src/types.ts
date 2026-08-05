@@ -108,6 +108,26 @@ export interface SuggestedBox {
 
 export type AutoLabelJobStatus = 'running' | 'done' | 'error';
 
+/** STEP-6.3: Kết quả validate dataset */
+export interface ValidateDuplicate {
+  hash: string;
+  imageIds: string[];
+}
+export interface ValidateInvalidAnnotation {
+  id: string;
+  imageId: string;
+  reason: string;
+}
+export interface ValidateUnusedClass {
+  id: string;
+  name: string;
+}
+export interface ValidateResult {
+  duplicates: ValidateDuplicate[];
+  invalidAnnotations: ValidateInvalidAnnotation[];
+  unusedClasses: ValidateUnusedClass[];
+}
+
 export interface AutoLabelJob {
   status: AutoLabelJobStatus;
   total: number;

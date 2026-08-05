@@ -324,6 +324,67 @@ function m005_phase3_schema() {
 
 m005_phase3_schema();
 
+// ─── m006_add_image_done_columns ───────────────────────────────────────────────
+// STEP-3.5: Đánh dấu ảnh "Xong" — 2 cột nullable vào bảng `images`.
+//   completed_at TEXT  — ISO datetime (nullable, NULL = chưa done)
+//   completed_by INT   — FK → users(id) (nullable)
+//
+// ADR (Image done status v3): dùng 2 cột riêng, KHÔNG mở rộng enum `status` —
+//   tách biệt rõ "đã label" (status=labeled) và "người label xác nhận xong" (completed_at).
+//
+// Idempotent: check PRAGMA table_info trước ALTER TABLE.
+// Verify: row count TRACKED trước/sau (CTO condition #1, same pattern m005).
+function m006_add_image_done_columns() {
+  const imgCols = db.prepare('PRAGMA table_info(images)').all().map((c) => c.name);
+  const needsCompletedAt = !imgCols.includes('completed_at');
+  const needsCompletedBy = !imgCols.includes('completed_by');
+
+  if (!needsCompletedAt && !needsCompletedBy) return; // already migrated
+
+  // === Row count BEFORE migration ===
+  const TRACKED = ['projects', 'classes', 'images', 'annotations', 'models', 'jobs', 'users'];
+  const before = {};
+  for (const t of TRACKED) {
+    try { before[t] = db.prepare(`SELECT COUNT(*) AS n FROM "${t}"`).get().n; }
+    catch (_) { before[t] = null; }
+  }
+  console.log('[INFO] m006: Row counts BEFORE migration:', JSON.stringify(before));
+
+  db.transaction(() => {
+    if (needsCompletedAt) {
+      db.exec('ALTER TABLE images ADD COLUMN completed_at TEXT');
+    }
+    if (needsCompletedBy) {
+      db.exec('ALTER TABLE images ADD COLUMN completed_by INTEGER REFERENCES users(id)');
+    }
+    db.exec('CREATE INDEX IF NOT EXISTS idx_images_completed_at ON images(completed_at)');
+  })();
+
+  // === Row count AFTER migration ===
+  const after = {};
+  for (const t of TRACKED) {
+    try { after[t] = db.prepare(`SELECT COUNT(*) AS n FROM "${t}"`).get().n; }
+    catch (_) { after[t] = null; }
+  }
+  console.log('[INFO] m006: Row counts AFTER  migration:', JSON.stringify(after));
+
+  // === Verify: không bảng nào được mất dữ liệu (CTO condition #1) ===
+  for (const t of TRACKED) {
+    if (before[t] === null) continue;
+    if (after[t] !== null && after[t] < before[t]) {
+      const msg =
+        `[CRITICAL] DATA LOSS in table "${t}": ${before[t]} rows → ${after[t]} rows. ` +
+        `Migration: m006_add_image_done_columns`;
+      console.error(msg);
+      throw new Error(msg);
+    }
+  }
+
+  console.log('[INFO] m006: Migration complete — data integrity verified ✓');
+}
+
+m006_add_image_done_columns();
+
 // ─── Retention helper: annotation_history ─────────────────────────────────────
 // Gọi bởi STEP-3.2 (routes/history.js) ngay sau mỗi INSERT INTO annotation_history.
 // Giữ tối đa 200 version gần nhất mỗi ảnh (ADR AD-5 retention policy).

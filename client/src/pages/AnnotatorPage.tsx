@@ -37,6 +37,7 @@ export default function AnnotatorPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<'saved' | 'dirty' | 'saving'>('saved');
   const [reviewBusy, setReviewBusy] = useState(false);
+  const [doneBusy, setDoneBusy] = useState(false);
   const currentUser = getCurrentUser();
   const canReview = currentUser?.role === 'reviewer' || currentUser?.role === 'admin';
   const [tool, setTool] = useState<Tool>('bbox');
@@ -137,6 +138,36 @@ export default function AnnotatorPage() {
       setReviewBusy(false);
     }
   }, [image]);
+
+  // ── Done status (STEP-3.5) ────────────────────────────────────────────────────
+  const handleMarkDone = useCallback(async () => {
+    if (!image || !projectId) return;
+    setDoneBusy(true);
+    try {
+      const updated = await api.markImageDone(projectId, image.id);
+      setImage((img) => img ? { ...img, completed_at: updated.completed_at, completed_by: updated.completed_by } : img);
+      setImages((imgs) => imgs.map((i) => i.id === image.id ? { ...i, completed_at: updated.completed_at, completed_by: updated.completed_by } : i));
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Đánh dấu xong thất bại');
+    } finally {
+      setDoneBusy(false);
+    }
+  }, [image, projectId]);
+
+  const handleUnmarkDone = useCallback(async () => {
+    if (!image || !projectId) return;
+    if (!confirm('Bỏ đánh dấu "Xong" cho ảnh này?')) return;
+    setDoneBusy(true);
+    try {
+      const updated = await api.unmarkImageDone(projectId, image.id);
+      setImage((img) => img ? { ...img, completed_at: updated.completed_at, completed_by: updated.completed_by } : img);
+      setImages((imgs) => imgs.map((i) => i.id === image.id ? { ...i, completed_at: updated.completed_at, completed_by: updated.completed_by } : i));
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Bỏ đánh dấu xong thất bại');
+    } finally {
+      setDoneBusy(false);
+    }
+  }, [image, projectId]);
 
   const scheduleSave = useCallback((nextBoxes: Box[]) => {
     setSaveState('dirty');
@@ -578,10 +609,19 @@ export default function AnnotatorPage() {
       }
       if (e.key === 'ArrowRight') goTo(1);
       if (e.key === 'ArrowLeft') goTo(-1);
+      // STEP-3.5: phím D để toggle done status
+      if ((e.key === 'd' || e.key === 'D') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        if (image?.completed_at) {
+          handleUnmarkDone();
+        } else {
+          handleMarkDone();
+        }
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selectedId, deleteSelected, classes, goTo, drawingPoints, cancelDrawing, undoLastPoint, assignClassToSelected]);
+  }, [selectedId, deleteSelected, classes, goTo, drawingPoints, cancelDrawing, undoLastPoint, assignClassToSelected, image, handleMarkDone, handleUnmarkDone]);
 
   if (!image) return <p>Đang tải ảnh...</p>;
 
@@ -615,7 +655,31 @@ export default function AnnotatorPage() {
           {saveState === 'saved' ? '✓ Đã lưu' : saveState === 'saving' ? 'Đang lưu...' : 'Chưa lưu...'}
         </span>
 
-        <div className="review-actions" style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
+        {/* STEP-3.5: Done status button — TRƯỚC nút Gửi duyệt */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
+          {image.completed_at ? (
+            <button
+              className="btn"
+              disabled={doneBusy}
+              onClick={handleUnmarkDone}
+              title="Bấm để bỏ đánh dấu xong (phím D)"
+              style={{ background: '#2e7d32', color: '#fff', border: 'none', fontWeight: 600 }}
+            >
+              ✓ Đã xong
+            </button>
+          ) : (
+            <button
+              className="btn btn-outline"
+              disabled={doneBusy}
+              onClick={handleMarkDone}
+              title="Xác nhận đã gán nhãn xong ảnh này (phím D)"
+            >
+              ☐ Xong (D)
+            </button>
+          )}
+        </div>
+
+        <div className="review-actions" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {image.review_status && image.review_status !== 'draft' && (
             <span style={{
               fontSize: 12, padding: '3px 8px', borderRadius: 4, color: '#fff',

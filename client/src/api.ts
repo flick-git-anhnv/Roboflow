@@ -158,6 +158,14 @@ export const api = {
   getAutoLabelJob: (projectId: string, jobId: string) =>
     request<AutoLabelJob>(`/api/projects/${projectId}/auto-label/${jobId}`),
 
+  // ── Done status (STEP-3.5) ──────────────────────────────────────────────────
+  /** Đánh dấu ảnh "Xong" — tất cả role được phép. */
+  markImageDone: (projectId: string, imageId: string) =>
+    request<ImageItem>(`/api/projects/${projectId}/images/${imageId}/mark-done`, { method: 'POST', body: JSON.stringify({}) }),
+  /** Bỏ đánh dấu "Xong" — annotator chỉ bỏ của mình; reviewer/admin bỏ bất kỳ. */
+  unmarkImageDone: (projectId: string, imageId: string) =>
+    request<ImageItem>(`/api/projects/${projectId}/images/${imageId}/mark-done`, { method: 'DELETE' }),
+
   // ── Review workflow (STEP-2.3) ───────────────────────────────────────────────
   submitReview: (imageId: string) =>
     request<ImageItem>(`/api/images/${imageId}/submit-review`, { method: 'POST', body: JSON.stringify({}) }),

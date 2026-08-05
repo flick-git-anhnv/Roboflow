@@ -43,6 +43,14 @@ router.post('/submit-review', requireRole('annotator', 'admin'), (req, res) => {
     });
   }
 
+  // STEP-3.5: Chỉ cho submit khi annotator đã đánh dấu "Xong" (completed_at IS NOT NULL)
+  if (!image.completed_at) {
+    return res.status(409).json({
+      error: 'IMAGE_NOT_COMPLETED',
+      detail: 'Ảnh phải được đánh dấu "Xong" trước khi gửi duyệt. Bấm nút "Xong" (phím D) trong trang gán nhãn.',
+    });
+  }
+
   db.prepare(
     "UPDATE images SET review_status = 'in_review', review_comment = NULL WHERE id = ?"
   ).run(imageId);

@@ -10,6 +10,7 @@ import AutoLabelModal from '../components/AutoLabelModal';
 type StatusFilter = 'all' | 'labeled' | 'unlabeled';
 type SplitFilter = 'all' | Split;
 type ReviewFilter = 'all' | 'draft' | 'in_review' | 'approved' | 'rejected';
+type DoneFilter = 'all' | 'done' | 'not_done';
 
 const REVIEW_LABEL: Record<string, string> = {
   draft: 'Nháp',
@@ -38,6 +39,7 @@ export default function ProjectDetailPage() {
   const [classFilter, setClassFilter] = useState<string>('all');
   const [splitFilter, setSplitFilter] = useState<SplitFilter>('all');
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>('all');
+  const [doneFilter, setDoneFilter] = useState<DoneFilter>('all');
   const currentUser = getCurrentUser();
   const canReview = currentUser?.role === 'reviewer' || currentUser?.role === 'admin';
 
@@ -143,10 +145,13 @@ export default function ProjectDetailPage() {
       if (splitFilter !== 'all' && img.split !== splitFilter) return false;
       if (classFilter !== 'all' && !(img.class_ids || []).includes(classFilter)) return false;
       if (reviewFilter !== 'all' && (img.review_status || 'draft') !== reviewFilter) return false;
+      // STEP-3.5: lọc theo done status
+      if (doneFilter === 'done' && !img.completed_at) return false;
+      if (doneFilter === 'not_done' && !!img.completed_at) return false;
       if (q && !img.original_name.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [images, search, statusFilter, splitFilter, classFilter, reviewFilter]);
+  }, [images, search, statusFilter, splitFilter, classFilter, reviewFilter, doneFilter]);
 
   const resetFilters = () => {
     setSearch('');
@@ -154,12 +159,13 @@ export default function ProjectDetailPage() {
     setClassFilter('all');
     setSplitFilter('all');
     setReviewFilter('all');
+    setDoneFilter('all');
   };
 
-  const hasActiveFilters = search || statusFilter !== 'all' || classFilter !== 'all' || splitFilter !== 'all' || reviewFilter !== 'all';
+  const hasActiveFilters = search || statusFilter !== 'all' || classFilter !== 'all' || splitFilter !== 'all' || reviewFilter !== 'all' || doneFilter !== 'all';
 
   // Quay về trang 1 mỗi khi bộ lọc hoặc kích thước trang thay đổi
-  useEffect(() => { setPage(1); }, [search, statusFilter, classFilter, splitFilter, reviewFilter, pageSize]);
+  useEffect(() => { setPage(1); }, [search, statusFilter, classFilter, splitFilter, reviewFilter, doneFilter, pageSize]);
 
   const pageCount = Math.max(1, Math.ceil(filteredImages.length / pageSize));
   const currentPage = Math.min(page, pageCount);
@@ -278,6 +284,12 @@ export default function ProjectDetailPage() {
                 <option value="draft">Nháp</option>
               </select>
             )}
+            {/* STEP-3.5: filter done status */}
+            <select value={doneFilter} onChange={(e) => setDoneFilter(e.target.value as DoneFilter)}>
+              <option value="all">Tất cả done</option>
+              <option value="done">Đã hoàn thành</option>
+              <option value="not_done">Chưa hoàn thành</option>
+            </select>
             {hasActiveFilters && (
               <button className="btn btn-outline" onClick={resetFilters}>Xoá bộ lọc</button>
             )}
@@ -303,6 +315,25 @@ export default function ProjectDetailPage() {
                   <span className={`badge ${img.status === 'labeled' ? 'labeled' : ''}`}>
                     {img.status === 'labeled' ? 'Đã gán' : 'Chưa gán'}
                   </span>
+                  {/* STEP-3.5: badge "Đã hoàn thành" */}
+                  {img.completed_at && (
+                    <span
+                      title={`Hoàn thành lúc ${new Date(img.completed_at).toLocaleString('vi-VN')}`}
+                      style={{
+                        position: 'absolute',
+                        bottom: 24,
+                        right: 4,
+                        fontSize: 10,
+                        padding: '1px 5px',
+                        borderRadius: 4,
+                        color: '#fff',
+                        background: '#1b5e20',
+                        fontWeight: 600,
+                      }}
+                    >
+                      ✓ Xong
+                    </span>
+                  )}
                   {img.review_status && img.review_status !== 'draft' && (
                     <span
                       className={`review-badge review-${img.review_status}`}

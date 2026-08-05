@@ -347,6 +347,9 @@ async function runTests() {
   const img8 = await (await uploadImage(PID, annotatorToken)).json();
   const img8Id = img8[0].id;
 
+  // STEP-3.5: mark done trước khi submit-review (IMAGE_NOT_COMPLETED gate)
+  await post(`/api/projects/${PID}/images/${img8Id}/mark-done`, {}, annotatorToken);
+
   // annotator submits for review (own image, draft → in_review)
   await checkStatus(
     'POST submit-review [annotator → 200]',
@@ -376,6 +379,7 @@ async function runTests() {
   // second image: reviewer rejects with comment (in_review → rejected)
   const img8b = await (await uploadImage(PID, annotatorToken)).json();
   const img8bId = img8b[0].id;
+  await post(`/api/projects/${PID}/images/${img8bId}/mark-done`, {}, annotatorToken); // STEP-3.5
   await post(`/api/images/${img8bId}/submit-review`, {}, annotatorToken);
   const rejectRes = await checkStatus(
     'POST reject [reviewer → 200]',
@@ -392,6 +396,7 @@ async function runTests() {
   // admin can approve too (third image)
   const img8c = await (await uploadImage(PID, annotatorToken)).json();
   const img8cId = img8c[0].id;
+  await post(`/api/projects/${PID}/images/${img8cId}/mark-done`, {}, annotatorToken); // STEP-3.5
   await post(`/api/images/${img8cId}/submit-review`, {}, annotatorToken);
   await checkStatus(
     'POST approve [admin → 200]',
@@ -645,6 +650,78 @@ async function runTests() {
     }, adminToken);
     ok('Row18: Save với version mới nhất → 200', saveC.status === 200,
       `got ${saveC.status}`);
+  }
+
+  // ── Row 19: Image done status (STEP-3.5) ─────────────────────────────────
+  console.log('\n── Row 19: Image done status (mark-done, submit-review gate, unmark) ──');
+
+  // Setup: upload fresh image (as annotator — để test owner-based unmark)
+  const img19AnnotatorRes = await uploadImage(PID, annotatorToken);
+  ok('Row19 setup: upload image as annotator', img19AnnotatorRes.status === 201);
+  const img19AnnotatorId = (await img19AnnotatorRes.json())[0]?.id;
+
+  // Upload fresh image as admin (để test annotator không được unmark của người khác)
+  const img19AdminRes = await uploadImage(PID, adminToken);
+  ok('Row19 setup: upload image as admin', img19AdminRes.status === 201);
+  const img19AdminId = (await img19AdminRes.json())[0]?.id;
+
+  if (img19AnnotatorId && img19AdminId) {
+    // 1. submit-review KHI CHƯA mark done → 409 IMAGE_NOT_COMPLETED
+    const submitBeforeDone = await post(`/api/images/${img19AnnotatorId}/submit-review`, {}, annotatorToken);
+    ok('Row19: submit-review khi chưa done → 409', submitBeforeDone.status === 409,
+      `got ${submitBeforeDone.status}`);
+    const submitBeforeData = await submitBeforeDone.json();
+    ok('Row19: 409 error=IMAGE_NOT_COMPLETED', submitBeforeData.error === 'IMAGE_NOT_COMPLETED',
+      `error=${submitBeforeData.error}`);
+
+    // 2. Mark done (annotator) → 200, trả completed_at và completed_by
+    const markDoneRes = await post(`/api/projects/${PID}/images/${img19AnnotatorId}/mark-done`, {}, annotatorToken);
+    ok('Row19: POST mark-done [annotator] → 200', markDoneRes.status === 200,
+      `got ${markDoneRes.status}`);
+    const markDoneData = await markDoneRes.json();
+    ok('Row19: mark-done trả completed_at (string)', typeof markDoneData.completed_at === 'string' && markDoneData.completed_at.length > 0,
+      `completed_at=${markDoneData.completed_at}`);
+    ok('Row19: mark-done trả completed_by (number)', typeof markDoneData.completed_by === 'number',
+      `completed_by=${markDoneData.completed_by}`);
+
+    // 3. GET image confirm completed_at IS NOT NULL
+    const img19GetRes = await get(`/api/projects/${PID}/images/${img19AnnotatorId}`, annotatorToken);
+    ok('Row19: GET image sau mark-done → 200', img19GetRes.status === 200);
+    const img19GetData = await img19GetRes.json();
+    ok('Row19: GET image trả completed_at đúng', typeof img19GetData.completed_at === 'string',
+      `completed_at=${img19GetData.completed_at}`);
+
+    // 4. submit-review SAU KHI mark done → 200
+    const submitAfterDone = await post(`/api/images/${img19AnnotatorId}/submit-review`, {}, annotatorToken);
+    ok('Row19: submit-review sau khi done → 200', submitAfterDone.status === 200,
+      `got ${submitAfterDone.status}`);
+    const submitAfterData = await submitAfterDone.json();
+    ok('Row19: review_status = in_review sau submit', submitAfterData.review_status === 'in_review',
+      `review_status=${submitAfterData.review_status}`);
+
+    // 5. Mark done admin image bởi admin → 200
+    const markDoneAdminRes = await post(`/api/projects/${PID}/images/${img19AdminId}/mark-done`, {}, adminToken);
+    ok('Row19: POST mark-done [admin] → 200', markDoneAdminRes.status === 200,
+      `got ${markDoneAdminRes.status}`);
+
+    // 6. Annotator cố unmark done ảnh của admin → 403
+    const unmarkOtherRes = await fetch(`${BASE}/api/projects/${PID}/images/${img19AdminId}/mark-done`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${annotatorToken}` },
+    });
+    ok('Row19: annotator DELETE mark-done ảnh của người khác → 403', unmarkOtherRes.status === 403,
+      `got ${unmarkOtherRes.status}`);
+
+    // 7. Admin unmark done ảnh của mình → 200
+    const unmarkAdminRes = await fetch(`${BASE}/api/projects/${PID}/images/${img19AdminId}/mark-done`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    ok('Row19: admin DELETE mark-done → 200', unmarkAdminRes.status === 200,
+      `got ${unmarkAdminRes.status}`);
+    const unmarkAdminData = await unmarkAdminRes.json();
+    ok('Row19: sau unmark — completed_at = null', unmarkAdminData.completed_at === null || unmarkAdminData.completed_at === undefined,
+      `completed_at=${unmarkAdminData.completed_at}`);
   }
 
   // ── Rate limit test ───────────────────────────────────────────────────────

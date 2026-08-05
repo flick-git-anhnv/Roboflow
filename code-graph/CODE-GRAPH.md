@@ -3,7 +3,7 @@
 > Tài liệu bản đồ codebase. Mọi coding agent PHẢI đọc file này TRƯỚC khi mở source.
 > Cập nhật ngay sau mỗi PR merge có thay đổi cấu trúc/API/schema.
 >
-> Last verified: 2026-08-05 | Cập nhật: senior-developer (STEP-3.4)
+> Last verified: 2026-08-05 | Cập nhật: senior-developer (STEP-3.5)
 
 ---
 
@@ -655,10 +655,14 @@ Các interface chính:
 | review_comment | TEXT | nullable — STEP-2.3 MỚI (lý do reject) |
 | reviewed_by | INTEGER | FK→users(id), nullable — STEP-2.3 MỚI |
 | reviewed_at | TEXT | nullable — STEP-2.3 MỚI |
+| completed_at | TEXT | nullable — STEP-3.5 MỚI (ISO datetime, NULL = chưa done) |
+| completed_by | INTEGER | FK→users(id), nullable — STEP-3.5 MỚI (người đã mark done) |
 
-**Index:** `idx_images_project ON images(project_id)`, `idx_images_review_status ON images(review_status)` (STEP-2.3 MỚI)
+**Index:** `idx_images_project ON images(project_id)`, `idx_images_review_status ON images(review_status)` (STEP-2.3), `idx_images_completed_at ON images(completed_at)` (STEP-3.5)
 
-**⚠️ Lưu ý cho STEP-3.5:** `submit-review` hiện cho phép bất kỳ ảnh draft/rejected nào (không check `completed_at`). Khi STEP-3.5 thêm `completed_at`/`completed_by`, sửa `reviews.js` để check `completed_at IS NOT NULL` trước khi cho submit-review.
+**ADR (done status v3):** dùng 2 cột riêng `completed_at`/`completed_by`, KHÔNG mở rộng enum `status` — tách biệt "có annotation" (status=labeled) và "annotator xác nhận xong" (completed_at NOT NULL).
+
+**Gate submit-review (STEP-3.5):** `submit-review` PHẢI có `completed_at IS NOT NULL` — trả 409 `IMAGE_NOT_COMPLETED` nếu chưa done.
 
 ### Bảng `annotations`
 
@@ -772,7 +776,9 @@ Các interface chính:
 | POST | /api/projects/:pid/images/upload | images.js:73 | ImageItem[] (201) |
 | POST | /api/projects/:pid/images/upload-zip | images.js:95 | {created, skipped} (201) |
 | PATCH | /api/projects/:pid/images/:iid | images.js:143 | ImageItem |
-| DELETE | /api/projects/:pid/images/:iid | images.js:153 | 204 |
+| POST | /api/projects/:pid/images/:iid/mark-done | images.js:~200 | ImageItem (completed_at, completed_by set) — STEP-3.5 MỚI |
+| DELETE | /api/projects/:pid/images/:iid/mark-done | images.js:~220 | ImageItem (completed_at=null, completed_by=null) — STEP-3.5 MỚI; annotator chỉ bỏ của mình (403 nếu người khác) |
+| DELETE | /api/projects/:pid/images/:iid | images.js:~253 | 204 |
 
 ### Annotations
 
@@ -938,7 +944,7 @@ Query params export: `format=yolo\|coco\|voc`, `splitMode=manual\|auto`, `trainR
 - `server/src/index.js` — mount `reviewsRouter` tại `/api/images/:imageId`
 - Test: `tests/auth.test.js` Row 8 — 8 test case pass (submit-review, approve, reject, comment, role guard, 401)
 
-**Watch out cho STEP-3.5:** `submit-review` hiện không check `completed_at` (field đó chưa tồn tại) — khi STEP-3.5 xong, cập nhật điều kiện submit trong `reviews.js`.
+**Đã xử lý ở STEP-3.5:** `submit-review` trong `reviews.js` đã check `completed_at IS NOT NULL` — trả 409 `IMAGE_NOT_COMPLETED` nếu chưa done.
 
 ---
 
@@ -998,13 +1004,23 @@ Query params export: `format=yolo\|coco\|voc`, `splitMode=manual\|auto`, `trainR
 
 ---
 
-### Phase 3.5 — Image done status
+### Phase 3.5 — Image done status — ✅ HOÀN THÀNH
 
-**Files bị ảnh hưởng:**
-- `server/src/db.js` — ALTER TABLE `images` ADD COLUMN `completed_at DATETIME`, ADD COLUMN `completed_by INTEGER REFERENCES users(id)`
-- `server/src/routes/images.js` — PATCH endpoint thêm xử lý `completed_at`/`completed_by`
-- `client/src/types.ts` — thêm `completed_at`, `completed_by` vào `ImageItem`
-- `client/src/pages/AnnotatorPage.tsx` — thêm nút/phím tắt "confirm done"
+**Files đã thay đổi (STEP-3.5):**
+- `server/src/db.js` — `m006_add_image_done_columns()`: ALTER TABLE `images` ADD `completed_at TEXT` + `completed_by INTEGER REFERENCES users(id)` + index; verify row count trước/sau (CTO condition #1 pattern).
+- `server/src/routes/images.js` — 2 endpoint MỚI: `POST /:imageId/mark-done` (tất cả role, set completed_at=now()/completed_by=req.user.id + logActivity); `DELETE /:imageId/mark-done` (annotator chỉ bỏ của mình — 403 nếu người khác, reviewer/admin any — set NULL).
+- `server/src/routes/reviews.js` — `submit-review` thêm gate `completed_at IS NOT NULL` → 409 `IMAGE_NOT_COMPLETED` nếu chưa done.
+- `client/src/types.ts` — `ImageItem` thêm `completed_at?: string | null`, `completed_by?: number | null`.
+- `client/src/api.ts` — thêm `markImageDone(projectId, imageId)` + `unmarkImageDone(projectId, imageId)`.
+- `client/src/pages/AnnotatorPage.tsx` — state `doneBusy`, handlers `handleMarkDone`/`handleUnmarkDone`, phím tắt D (toggle done), nút "☐ Xong (D)" / "✓ Đã xong" trong toolbar.
+- `client/src/pages/ProjectDetailPage.tsx` — type `DoneFilter`, filter dropdown "Đã hoàn thành / Chưa hoàn thành", badge "✓ Xong" màu xanh đậm trên image tile.
+- `tests/auth.test.js` — Row 8 (submit-review): thêm mark-done trước mỗi submit; Row 19 (15 test case): gate 409, mark-done, unmark, role guard. 128 passed, 0 failed.
+
+**Depth-1 callers:**
+- `client/api.ts` → `AnnotatorPage.tsx` (markImageDone/unmarkImageDone)
+- `reviews.js` submit-review gate → caller: `client/api.ts → AnnotatorPage.tsx` (submitReview)
+
+**Watch out cho Phase 4:** Phase 4 (detect cache) không đụng bảng `images`/`annotations`/`annotation_history` — không cần cập nhật done logic. Phase 5 (UX) cũng không đụng `completed_at`/`completed_by`.
 
 ---
 
@@ -1047,3 +1063,4 @@ Query params export: `format=yolo\|coco\|voc`, `splitMode=manual\|auto`, `trainR
 | 2026-08-05 | senior-developer (STEP-3.2) | Thêm §3.14 history.js (MỚI), cập nhật §2 (routes/history.js), §3.1 (mount /api/images/:id history), §3.6 (annotations.js + pruneAnnotationHistory), §7 (Annotation History endpoints), §9 Phase 3.2 DONE — 93 test pass (0 fail, 0 skip) | a4c3519 |
 | 2026-08-05 | junior-developer (STEP-3.3) | Thêm §3.15 activity.js (MỚI), cập nhật §2 (routes/activity.js), §3.1 (mount /api/projects/:id/activity + activityRouter), §3.2 (db.js exports: logActivity), §3.9 (images.js gọi logActivity), §3.10 (export.js gọi logActivity), §9 Phase 3.3 DONE — 101 test pass (0 fail, 0 skip) | a0f01dc |
 | 2026-08-05 | senior-developer (STEP-3.4) | Cập nhật §3.5 (GET /:imageId trả thêm annotationVersion), §3.6 (annotations.js — optimistic locking: check expectedVersion trước transaction, PUT response đổi từ Annotation[] thành {annotations, annotationVersion}), §4.2 (api.ts — saveAnnotations thêm tham số expectedVersion), §4.3 (ImageWithAnnotations.annotationVersion), §4.4 (AnnotatorPage — annotationVersionRef, 409 handling), §7 (PUT annotations response 409), §9 Phase 3.4 DONE — 113 test pass (0 fail, 0 skip), tsc 0 lỗi | (STEP-3.4) |
+| 2026-08-05 | senior-developer (STEP-3.5) | Cập nhật §6 (images — 2 cột mới completed_at/completed_by + index), §7 (Images — 2 endpoint MỚI POST/DELETE mark-done; reviews.js gate IMAGE_NOT_COMPLETED), §9 Phase 3.5 DONE — 128 test pass (0 fail, 0 skip), tsc 0 lỗi. **Phase 3 HOÀN TOÀN HOÀN THÀNH.** | (STEP-3.5) |

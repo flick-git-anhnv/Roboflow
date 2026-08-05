@@ -195,6 +195,62 @@ router.patch('/:imageId', (req, res) => {
   res.json(db.prepare('SELECT * FROM images WHERE id = ?').get(req.params.imageId));
 });
 
+// ── POST /:imageId/mark-done ──────────────────────────────────────────────────
+// STEP-3.5: Đánh dấu ảnh đã hoàn thành label (tất cả role được phép).
+// Body: {} (không cần field nào)
+// Response: ImageItem với completed_at và completed_by đã cập nhật.
+router.post('/:imageId/mark-done', (req, res) => {
+  const existing = db.prepare('SELECT * FROM images WHERE id = ? AND project_id = ?')
+    .get(req.params.imageId, req.params.projectId);
+  if (!existing) return res.status(404).json({ error: 'Không tìm thấy ảnh' });
+
+  const now = new Date().toISOString();
+  db.prepare('UPDATE images SET completed_at = ?, completed_by = ? WHERE id = ?')
+    .run(now, req.user.id, req.params.imageId);
+
+  logActivity(req.params.projectId, req.user.id, 'image_marked_done', {
+    image_id: req.params.imageId,
+    filename: existing.original_name,
+  });
+
+  res.json(db.prepare('SELECT * FROM images WHERE id = ?').get(req.params.imageId));
+});
+
+// ── DELETE /:imageId/mark-done ────────────────────────────────────────────────
+// STEP-3.5: Bỏ đánh dấu "Xong".
+// annotator: chỉ được bỏ done ảnh MÌnh đã mark (completed_by === req.user.id)
+// reviewer/admin: được bỏ done bất kỳ ảnh
+router.delete('/:imageId/mark-done', (req, res) => {
+  const existing = db.prepare('SELECT * FROM images WHERE id = ? AND project_id = ?')
+    .get(req.params.imageId, req.params.projectId);
+  if (!existing) return res.status(404).json({ error: 'Không tìm thấy ảnh' });
+
+  if (!existing.completed_at) {
+    return res.status(409).json({
+      error: 'IMAGE_NOT_DONE',
+      detail: 'Ảnh chưa được đánh dấu "Xong" — không có gì để bỏ.',
+    });
+  }
+
+  // Role check: annotator chỉ được bỏ done của chính mình
+  if (req.user?.role === 'annotator' && existing.completed_by !== req.user.id) {
+    return res.status(403).json({
+      error: 'AUTH_FORBIDDEN',
+      detail: 'Annotator chỉ được bỏ đánh dấu "Xong" ảnh do mình đánh dấu.',
+    });
+  }
+
+  db.prepare('UPDATE images SET completed_at = NULL, completed_by = NULL WHERE id = ?')
+    .run(req.params.imageId);
+
+  logActivity(req.params.projectId, req.user.id, 'image_unmarked_done', {
+    image_id: req.params.imageId,
+    filename: existing.original_name,
+  });
+
+  res.json(db.prepare('SELECT * FROM images WHERE id = ?').get(req.params.imageId));
+});
+
 // AD-A5: Xoá ảnh MÌNH upload (annotator = self only; reviewer/admin = any)
 router.delete('/:imageId', (req, res) => {
   const existing = db.prepare('SELECT * FROM images WHERE id = ? AND project_id = ?')

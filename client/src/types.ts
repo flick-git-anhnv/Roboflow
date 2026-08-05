@@ -49,6 +49,9 @@ export interface ImageItem {
   review_comment?: string | null;
   reviewed_by?: number | null;
   reviewed_at?: string | null;
+  /** STEP-3.5: Annotator đã xác nhận xong (completed_at IS NOT NULL). */
+  completed_at?: string | null;
+  completed_by?: number | null;
 }
 
 export type AnnotationType = 'bbox' | 'quad';

@@ -6,7 +6,7 @@ const router = Router({ mergeParams: true });
 
 function normalizeHotkey(hotkey) {
   if (typeof hotkey !== 'string') return null;
-  const trimmed = hotkey.trim().slice(0, 1);
+  const trimmed = hotkey.trim().slice(0, 2);
   return trimmed || null;
 }
 

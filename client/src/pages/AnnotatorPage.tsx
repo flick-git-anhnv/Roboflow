@@ -76,6 +76,25 @@ export default function AnnotatorPage() {
     try { return localStorage.getItem('filmstrip_visible') !== 'false'; } catch { return true; }
   });
 
+  /** STEP-5.5: MRU — danh sách tối đa 9 class dùng gần nhất, persist localStorage per project. */
+  const [mruClassIds, setMruClassIds] = useState<string[]>(() => {
+    if (!projectId) return [];
+    try {
+      const stored = localStorage.getItem(`mru_classes_${projectId}`);
+      return stored ? (JSON.parse(stored) as string[]) : [];
+    } catch { return []; }
+  });
+
+  /** STEP-5.5: Buffer 2-char hotkey — tích lũy ký tự để khớp hotkey 1-2 ký tự. */
+  const hotkeyBufferRef = useRef<string>('');
+  const hotkeyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /** STEP-5.5: Ctrl+K quick switcher — state modal fuzzy search. */
+  const [showSwitcher, setShowSwitcher] = useState(false);
+  const [switcherQuery, setSwitcherQuery] = useState('');
+  const [switcherIdx, setSwitcherIdx] = useState(0);
+  const switcherInputRef = useRef<HTMLInputElement>(null);
+
   // STEP-5.1: Undo/Redo history (client-side only, cleared on save success / image change)
   const undoStackRef = useRef<Box[][]>([]);
   const redoStackRef = useRef<Box[][]>([]);
@@ -184,7 +203,31 @@ export default function AnnotatorPage() {
     });
   }, []);
 
+  /** STEP-5.5: Cập nhật MRU — đẩy classId vừa dùng lên đầu, giới hạn 9 phần tử, persist localStorage. */
+  const pushToMru = useCallback((classId: string) => {
+    setMruClassIds((prev) => {
+      const filtered = prev.filter((id) => id !== classId);
+      const next = [classId, ...filtered].slice(0, 9);
+      try { if (projectId) localStorage.setItem(`mru_classes_${projectId}`, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }, [projectId]);
+
   const classById = useMemo(() => new Map(classes.map((c) => [c.id, c])), [classes]);
+
+  /** STEP-5.5: Kết quả tìm kiếm fuzzy cho quick switcher (filter realtime theo switcherQuery). */
+  const switcherResults = useMemo(
+    () => classes.filter((c) => fuzzyMatch(switcherQuery, c.name)),
+    [classes, switcherQuery],
+  );
+
+  /** STEP-5.5: Auto-focus input khi modal mở. */
+  useEffect(() => {
+    if (showSwitcher) {
+      const t = setTimeout(() => switcherInputRef.current?.focus(), 10);
+      return () => clearTimeout(t);
+    }
+  }, [showSwitcher]);
 
   // ── Review workflow (STEP-2.3) ────────────────────────────────────────────────
   const handleSubmitReview = useCallback(async () => {
@@ -792,11 +835,45 @@ export default function AnnotatorPage() {
 
   const assignClassToSelected = useCallback((classId: string) => {
     setActiveClassId(classId);
+    pushToMru(classId);
     if (selectedId) {
       updateBoxes((prev) => prev.map((b) => (b.id === selectedId ? { ...b, class_id: classId } : b)));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId]);
+  }, [selectedId, pushToMru]);
+
+  /** STEP-5.5: Áp dụng class từ quick switcher và đóng modal. */
+  const applySwitcherClass = useCallback((classId: string) => {
+    assignClassToSelected(classId);
+    setShowSwitcher(false);
+    setSwitcherQuery('');
+  }, [assignClassToSelected]);
+
+  /** STEP-5.5: Xử lý phím trong quick switcher input (↑↓ navigate, Enter chọn, Esc đóng). */
+  const handleSwitcherKey = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      setShowSwitcher(false);
+      setSwitcherQuery('');
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSwitcherIdx((prev) => Math.min(prev + 1, switcherResults.length - 1));
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSwitcherIdx((prev) => Math.max(prev - 1, 0));
+      return;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const chosen = switcherResults[switcherIdx];
+      if (chosen) applySwitcherClass(chosen.id);
+      return;
+    }
+  }, [switcherResults, switcherIdx, applySwitcherClass]);
 
   const undoLastPoint = useCallback(() => {
     setDrawingPoints((prev) => prev.slice(0, -1));
@@ -806,6 +883,18 @@ export default function AnnotatorPage() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // STEP-5.5: Ctrl+K → toggle quick switcher (trước HTMLInputElement check để luôn hoạt động)
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setShowSwitcher((prev) => {
+          if (prev) { setSwitcherQuery(''); return false; }
+          setSwitcherQuery('');
+          setSwitcherIdx(0);
+          return true;
+        });
+        return;
+      }
+
       if (e.target instanceof HTMLInputElement) return;
 
       // STEP-5.1: Ctrl+Z → undo last point (if drawing quad) OR undo operation
@@ -817,8 +906,6 @@ export default function AnnotatorPage() {
           if (e.shiftKey) {
             redo();
           } else if (drawingPoints.length > 0) {
-            // When actively placing a quad, Ctrl+Z removes the last placed point
-            // (same behavior as Delete/Backspace + right-click in this mode)
             undoLastPoint();
           } else {
             undo();
@@ -849,28 +936,74 @@ export default function AnnotatorPage() {
         e.preventDefault();
         deleteSelected();
       }
+
       if (!e.ctrlKey && !e.metaKey && !e.altKey) {
-        const idx = classes.findIndex((c, i) => {
-          const key = effectiveHotkey(c, i);
-          return key !== null && key.toLowerCase() === e.key.toLowerCase();
-        });
-        if (idx >= 0) assignClassToSelected(classes[idx].id);
+        // STEP-5.5: Phím 1-9 → chọn class theo thứ tự MRU (class dùng gần nhất = phím 1)
+        if (e.key >= '1' && e.key <= '9') {
+          const mruIdx = Number(e.key) - 1;
+          const classId = mruClassIds[mruIdx];
+          if (classId && classes.find((c) => c.id === classId)) {
+            assignClassToSelected(classId);
+          }
+          return;
+        }
+
+        // STEP-5.5: Ký tự chữ → buffer 2-char hotkey với cơ chế timeout 500ms
+        if (e.key.length === 1 && /[a-zA-Z]/.test(e.key)) {
+          hotkeyBufferRef.current += e.key.toLowerCase();
+          if (hotkeyBufferRef.current.length > 2) hotkeyBufferRef.current = e.key.toLowerCase();
+          if (hotkeyTimerRef.current) clearTimeout(hotkeyTimerRef.current);
+
+          const buf = hotkeyBufferRef.current;
+
+          if (buf.length === 2) {
+            // Kiểm tra khớp 2-char trước
+            const match2 = classes.find((c) => c.hotkey?.trim().toLowerCase() === buf);
+            if (match2) { assignClassToSelected(match2.id); hotkeyBufferRef.current = ''; return; }
+            // Không khớp 2-char → thử ký tự vừa gõ là 1-char hotkey
+            const lastKey = e.key.toLowerCase();
+            const match1 = classes.find((c) => c.hotkey?.trim().toLowerCase() === lastKey && (c.hotkey?.trim().length ?? 0) === 1);
+            if (match1) assignClassToSelected(match1.id);
+            hotkeyBufferRef.current = '';
+            return;
+          }
+
+          // Buffer = 1 ký tự: có hotkey 2-char nào bắt đầu bằng ký tự này không?
+          const hasAmbiguous = classes.some((c) => {
+            const hk = c.hotkey?.trim().toLowerCase() ?? '';
+            return hk.length === 2 && hk.startsWith(buf);
+          });
+
+          if (!hasAmbiguous) {
+            // Không nhập nhằng → áp dụng ngay nếu có 1-char match
+            const match1 = classes.find((c) => c.hotkey?.trim().toLowerCase() === buf && (c.hotkey?.trim().length ?? 0) === 1);
+            if (match1) assignClassToSelected(match1.id);
+            hotkeyBufferRef.current = '';
+            return;
+          }
+
+          // Có thể nhập nhằng với 2-char hotkey → chờ 500ms
+          hotkeyTimerRef.current = setTimeout(() => {
+            const b = hotkeyBufferRef.current;
+            hotkeyBufferRef.current = '';
+            const match = classes.find((c) => c.hotkey?.trim().toLowerCase() === b);
+            if (match) assignClassToSelected(match.id);
+          }, 500);
+          return;
+        }
       }
+
       if (e.key === 'ArrowRight') goTo(1);
       if (e.key === 'ArrowLeft') goTo(-1);
       // STEP-3.5: phím D để toggle done status
       if ((e.key === 'd' || e.key === 'D') && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
-        if (image?.completed_at) {
-          handleUnmarkDone();
-        } else {
-          handleMarkDone();
-        }
+        if (image?.completed_at) { handleUnmarkDone(); } else { handleMarkDone(); }
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selectedId, deleteSelected, classes, goTo, drawingPoints, cancelDrawing, undoLastPoint, assignClassToSelected, image, handleMarkDone, handleUnmarkDone, undo, redo, copyLabelsFromPrev]);
+  }, [selectedId, deleteSelected, classes, goTo, drawingPoints, cancelDrawing, undoLastPoint, assignClassToSelected, image, handleMarkDone, handleUnmarkDone, undo, redo, copyLabelsFromPrev, mruClassIds]);
 
   if (!image) return <p>Đang tải ảnh...</p>;
 
@@ -1051,33 +1184,40 @@ export default function AnnotatorPage() {
           <div>
             <h4>{selectedId ? 'Đổi nhãn khung đã chọn' : 'Chọn nhãn (bấm phím tắt)'}</h4>
             <div className="class-list-scroll">
-              {classes.map((c, idx) => {
+              {classes.map((c) => {
                 const highlighted = selectedId
                   ? boxes.find((b) => b.id === selectedId)?.class_id === c.id
                   : activeClassId === c.id;
-                const key = effectiveHotkey(c, idx);
+                const mruIdx = mruClassIds.indexOf(c.id);
+                const mruKey = mruIdx >= 0 && mruIdx < 9 ? String(mruIdx + 1) : null;
                 return (
                   <div key={c.id} className={`class-picker-row ${highlighted ? 'active' : ''}`}
                     onClick={() => assignClassToSelected(c.id)}>
                     <span className="swatch" style={{ background: c.color }} />
-                    <span>{c.name}</span>
-                    <span className={`key ${c.hotkey ? 'custom' : ''}`}>{key || ''}</span>
+                    <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
+                    <span style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
+                      {mruKey && <span className="key">{mruKey}</span>}
+                      {c.hotkey && <span className="key custom">{c.hotkey}</span>}
+                    </span>
                   </div>
                 );
               })}
             </div>
             <p style={{ fontSize: 11.5, color: '#888', margin: '4px 0 0' }}>
-              Vào trang project để đổi phím tắt cho từng nhãn (ô nhỏ cạnh tên nhãn).
+              Phím 1-9 = 9 class dùng gần nhất (MRU). Ctrl+K = tìm nhanh.
             </p>
             {classes.length === 0 && <p style={{ fontSize: 12.5, color: '#888' }}>Chưa có nhãn nào. Quay lại project để thêm nhãn.</p>}
           </div>
           <p style={{ fontSize: 12, color: '#888', lineHeight: 1.5 }}>
             <b>Box:</b> kéo chuột để vẽ khung chữ nhật.<br />
             <b>Quad:</b> bấm lần lượt 4 điểm quanh vật xiên/nghiêng.<br />
-            Chọn khung để di chuyển / kéo từng điểm góc, hoặc bấm nhãn khác/phím số để đổi nhãn. Delete để xoá khung đã chọn.<br />
-            <b>Zoom:</b> lăn chuột hoặc nút +/− trên ảnh. <b>Pan:</b> giữ phím Space rồi kéo (hoặc kéo bằng chuột giữa).<br />
-            <b>Hoàn tác:</b> Ctrl+Z | <b>Làm lại:</b> Ctrl+Y / Ctrl+Shift+Z<br />
-            <b>Copy nhãn ảnh trước:</b> Alt+C (camera tĩnh — object ở vị trí tương tự)
+            Delete = xoá khung đã chọn.<br />
+            <b>Zoom:</b> lăn chuột hoặc nút +/−. <b>Pan:</b> Space + kéo.<br />
+            <b>Hoàn tác:</b> Ctrl+Z | <b>Làm lại:</b> Ctrl+Y<br />
+            <b>Copy nhãn ảnh trước:</b> Alt+C<br />
+            <b>Chọn class nhanh:</b> <b>Ctrl+K</b> (fuzzy search)<br />
+            <b>Phím 1-9:</b> 9 class MRU (dùng gần nhất = 1)<br />
+            <b>Hotkey 2 ký tự:</b> gõ nhanh 2 ký tự liên tiếp (≤500ms)
           </p>
         </div>
 
@@ -1116,6 +1256,46 @@ export default function AnnotatorPage() {
           - Badge màu ở dưới mỗi thumb: trạng thái labeled/done/review.
           - Lazy load qua browser native (loading="lazy") + thumbnail endpoint STEP-1.3.
           - Ẩn/hiện bằng nút toggle, trạng thái persist localStorage. */}
+      {/* STEP-5.5: Quick class switcher — Ctrl+K mở modal fuzzy search */}
+      {showSwitcher && (
+        <div
+          className="class-switcher-overlay"
+          onClick={() => { setShowSwitcher(false); setSwitcherQuery(''); }}
+        >
+          <div className="class-switcher-modal" onClick={(e) => e.stopPropagation()}>
+            <input
+              ref={switcherInputRef}
+              className="class-switcher-input"
+              value={switcherQuery}
+              onChange={(e) => { setSwitcherQuery(e.target.value); setSwitcherIdx(0); }}
+              onKeyDown={handleSwitcherKey}
+              placeholder="Tìm nhãn... (↑↓ di chuyển, Enter chọn, Esc đóng)"
+            />
+            <div className="class-switcher-list">
+              {switcherResults.map((c, i) => {
+                const mi = mruClassIds.indexOf(c.id);
+                return (
+                  <div
+                    key={c.id}
+                    className={`class-switcher-row${i === switcherIdx ? ' selected' : ''}`}
+                    onClick={() => applySwitcherClass(c.id)}
+                    onMouseEnter={() => setSwitcherIdx(i)}
+                  >
+                    <span style={{ width: 14, height: 14, borderRadius: 3, flexShrink: 0, background: c.color, display: 'inline-block' }} />
+                    <span style={{ flex: 1 }}>{c.name}</span>
+                    {mi >= 0 && mi < 9 && <span className="key" style={{ fontSize: 11 }}>{mi + 1}</span>}
+                    {c.hotkey && <span className="key custom" style={{ fontSize: 11 }}>{c.hotkey}</span>}
+                  </div>
+                );
+              })}
+              {switcherResults.length === 0 && (
+                <div style={{ padding: '10px 16px', color: '#888', fontSize: 13 }}>Không tìm thấy nhãn nào</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {showFilmstrip && (
         <div className="filmstrip" ref={filmstripRef}>
           {images.map((img) => {
@@ -1204,8 +1384,15 @@ function suggestionToBox(s: SuggestedBox): Box {
   return { id, class_id: s.class_id, type: 'bbox', x: s.x, y: s.y, w: s.w, h: s.h };
 }
 
-function effectiveHotkey(cls: ClassLabel, idx: number): string | null {
-  const custom = cls.hotkey?.trim();
-  if (custom) return custom;
-  return idx < 9 ? String(idx + 1) : null;
+/** STEP-5.5: Fuzzy match — substring trước, nếu không khớp thì sequential character match, không phân biệt hoa thường. */
+function fuzzyMatch(query: string, name: string): boolean {
+  if (!query) return true;
+  const q = query.toLowerCase();
+  const n = name.toLowerCase();
+  if (n.includes(q)) return true;
+  let qi = 0;
+  for (let i = 0; i < n.length && qi < q.length; i++) {
+    if (n[i] === q[qi]) qi++;
+  }
+  return qi === q.length;
 }

@@ -3,7 +3,7 @@
 > Tài liệu bản đồ codebase. Mọi coding agent PHẢI đọc file này TRƯỚC khi mở source.
 > Cập nhật ngay sau mỗi PR merge có thay đổi cấu trúc/API/schema.
 >
-> Last verified: 2026-08-05 | Cập nhật: junior-developer (STEP-6.1)
+> Last verified: 2026-08-05 | Cập nhật: main-agent (UsersPage + bugfix)
 
 ---
 
@@ -547,6 +547,7 @@ Lifecycle: `draft → in_review → approved` hoặc `→ rejected → (submit l
 | Route | Component | Mô tả |
 |---|---|---|
 | `/` | ProjectsPage | Danh sách projects |
+| `/users` | UsersPage (MỚI — bổ sung sau STEP-6.3) | Quản lý tài khoản — chỉ render nội dung thật cho role admin (guard trong component, không phải route-level) |
 | `/projects/:projectId` | ProjectDetailPage | Chi tiết project, image grid |
 | `/projects/:projectId/annotate/:imageId` | AnnotatorPage | Canvas annotator |
 
@@ -577,6 +578,7 @@ markImageDone, unmarkImageDone
 submitReview, approveReview, rejectReview
 getPrefill(projectId, imageId, conf?)   ← [STEP-4.2] MỚI — trả { suggestions: SuggestedBox[] }
 setDefaultModel(projectId, modelId)     ← [STEP-4.2] MỚI — PATCH default-model, modelId=null để bỏ
+listUsers, createUser, updateUser, deleteUser   ← MỚI (bổ sung sau STEP-6.3, dùng bởi UsersPage) — map trực tiếp routes/users.js
 ```
 
 > **[STEP-4.2]** `getPrefill` silently ignores 422 (no model) ở AnnotatorPage — prefill là tính năng nền, không block UX. `setDefaultModel` dùng trong ProjectDetailPage bởi reviewer/admin.
@@ -624,6 +626,20 @@ Các interface chính:
 | Modals | StatsPanel, ExportModal, AutoLabelModal |
 | **[STEP-4.2] Default model UI** | Section "Quản lý Model" trong side panel: list models, nút "Đặt mặc định" / badge "✓ Mặc định" / nút "Bỏ mặc định". Chỉ reviewer/admin mới thấy (role check). |
 | **[STEP-6.1] Model metadata UI** | Sort models by map_score DESC (null last); badge "★ Best" cho model có map_score cao nhất; badge version_label; hiển thị mAP%, notes inline; nút "✏️ Sửa" mở form inline nhập notes/map_score/version_label; save qua PATCH; `sortedModels` + `bestModelId` dùng useMemo. |
+
+---
+
+### 4.5b `client/src/pages/UsersPage.tsx` — Quản lý tài khoản (MỚI — bổ sung sau STEP-6.3)
+
+| Thuộc tính | Giá trị | Confidence |
+|---|---|---|
+| Route | `/users` (App.tsx) | CONFIRMED |
+| Guard | Component-level: `getCurrentUser()?.role !== 'admin'` → render empty-state, KHÔNG chặn ở route (backend vẫn enforce role thật qua `requireRole('admin')` trong `routes/users.js`) | CONFIRMED |
+| API calls | api.listUsers, api.createUser, api.updateUser, api.deleteUser | CONFIRMED |
+| Features | Danh sách user (table: username/display_name/role select/is_active toggle/last_login/xoá), form tạo user mới (username/password/display_name/role) | CONFIRMED |
+| Không thể tự sửa/xoá | Row của user hiện tại disable select role + toggle active + nút xoá (so `u.id === currentUser?.id`) | CONFIRMED |
+| Link header | App.tsx hiện link "Quản lý tài khoản" trong topbar CHỈ khi `user.role === 'admin'` | CONFIRMED |
+| Last verified | 2026-08-05 | - |
 
 ---
 
@@ -1201,3 +1217,4 @@ Query params export: `format=yolo\|coco\|voc`, `splitMode=manual\|auto`, `trainR
 | 2026-08-05 | junior-developer (STEP-5.3) | Cập nhật §3.5 (images.js — 2 route MỚI PATCH /batch + DELETE /batch), §7 (Images API table), §4.2 (api.ts — batchUpdateImages, batchDeleteImages), §4.4 (ProjectDetailPage — selectedIds state, toggleSelect, batchChangeSplit, batchDelete, batch toolbar UI, checkbox mỗi tile), tests Row 22 (16 test case). STEP-5.3 DONE — 162 test pass (0 fail, 0 skip), tsc 0 lỗi | (STEP-5.3) |
 | 2026-08-05 | junior-developer (STEP-6.1) | Cập nhật §3.9 (models.js — PATCH /:modelId MỚI), §6 (bảng models — 3 cột mới notes/map_score/version_label + m009), §7 (Models API PATCH), §4.2 (api.ts — updateModel), §4.3 (ModelInfo thêm 3 field), §4.5 (ProjectDetailPage — sortedModels, bestModelId, inline edit, badges), §9 Phase 6.1 DONE — 175 test pass (0 fail, 0 skip), tsc 0 lỗi | (STEP-6.1) |
 | 2026-08-05 | junior-developer (STEP-6.3) | Thêm §3.17 validate.js (MỚI), cập nhật §3.1 (mount /api/projects/:id validate), §4.2 (api.ts — validateDataset), §4.3 (ValidateResult types), §4.5 (ProjectDetailPage — button + ValidateModal), thêm component ValidateModal.tsx, §9 Phase 6 HOÀN THÀNH — 193 test pass (0 fail, 0 skip), tsc 0 lỗi | (STEP-6.3) |
+| 2026-08-05 | main-agent (chạy thử + bugfix sau khi plan hoàn thành) | Fix stale closure drag (kéo A di chuyển nhầm B), fix flex overflow ẩn nút xoá nhãn (min-width:0), UX hover+trạng thái class picker, mở rộng hotkey-input maxLength 1→2 (khớp thiết kế 2-char đã có ở server+AnnotatorPage). Thêm §4.1 route `/users`, §4.2 api.ts (listUsers/createUser/updateUser/deleteUser), §4.5b UsersPage.tsx MỚI (quản lý tài khoản — trước đây chỉ có API, chưa có UI) — 193 test pass, tsc 0 lỗi | main-agent |

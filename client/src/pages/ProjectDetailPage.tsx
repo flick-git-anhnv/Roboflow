@@ -284,7 +284,7 @@ export default function ProjectDetailPage() {
                   <input type="color" value={cls.color} onChange={(e) => updateClass(cls, { color: e.target.value })} />
                   <input type="text" defaultValue={cls.name}
                     onBlur={(e) => e.target.value.trim() && e.target.value !== cls.name && updateClass(cls, { name: e.target.value.trim() })} />
-                  <input type="text" className="hotkey-input" maxLength={1} placeholder="—"
+                  <input type="text" className="hotkey-input" maxLength={2} placeholder="—"
                     defaultValue={cls.hotkey || ''} title="Phím tắt để chọn nhanh nhãn này khi gán nhãn"
                     onBlur={(e) => {
                       const v = e.target.value.trim();

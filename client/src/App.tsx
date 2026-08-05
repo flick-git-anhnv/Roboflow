@@ -3,6 +3,7 @@ import ProjectsPage from './pages/ProjectsPage';
 import ProjectDetailPage from './pages/ProjectDetailPage';
 import AnnotatorPage from './pages/AnnotatorPage';
 import LoginPage from './pages/LoginPage';
+import UsersPage from './pages/UsersPage';
 import Logo from './components/Logo';
 import { getToken, clearAuth, api } from './api';
 import type { User } from './types';
@@ -70,6 +71,11 @@ export default function App() {
                 <span className="topbar-subtitle">Công cụ gán nhãn ảnh nội bộ</span>
                 {user && (
                   <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+                    {user.role === 'admin' && (
+                      <Link to="/users" style={{ fontSize: 13, color: '#4A3F8C', textDecoration: 'none' }}>
+                        Quản lý tài khoản
+                      </Link>
+                    )}
                     <span style={{
                       fontSize: 13,
                       color: '#4A3F8C',
@@ -106,6 +112,7 @@ export default function App() {
               <main className="app-main">
                 <Routes>
                   <Route path="/" element={<ProjectsPage />} />
+                  <Route path="/users" element={<UsersPage />} />
                   <Route path="/projects/:projectId" element={<ProjectDetailPage />} />
                   <Route path="/projects/:projectId/annotate/:imageId" element={<AnnotatorPage />} />
                 </Routes>

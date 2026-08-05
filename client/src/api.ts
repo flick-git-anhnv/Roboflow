@@ -74,6 +74,14 @@ export const api = {
   },
   getMe: () => request<User>('/api/auth/me'),
 
+  // ── Quản lý user (admin) ──────────────────────────────────────────────────────
+  listUsers: () => request<User[]>('/api/users'),
+  createUser: (data: { username: string; password: string; display_name?: string; role?: string; color?: string }) =>
+    request<User>('/api/users', { method: 'POST', body: JSON.stringify(data) }),
+  updateUser: (id: number, patch: Partial<{ display_name: string; color: string; password: string; role: string; is_active: boolean }>) =>
+    request<User>(`/api/users/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  deleteUser: (id: number) => request<void>(`/api/users/${id}`, { method: 'DELETE' }),
+
   listProjects: () => request<Project[]>('/api/projects'),
   createProject: (name: string, description: string) =>
     request<Project>('/api/projects', { method: 'POST', body: JSON.stringify({ name, description }) }),

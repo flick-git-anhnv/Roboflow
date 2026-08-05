@@ -3,7 +3,7 @@
 > Tài liệu bản đồ codebase. Mọi coding agent PHẢI đọc file này TRƯỚC khi mở source.
 > Cập nhật ngay sau mỗi PR merge có thay đổi cấu trúc/API/schema.
 >
-> Last verified: 2026-08-04 | Cập nhật: junior-developer (STEP-1.3)
+> Last verified: 2026-08-05 | Cập nhật: senior-developer (STEP-3.2)
 
 ---
 
@@ -99,7 +99,8 @@ Roboflow - Copy/
 │   │   │   ├── classes.js
 │   │   │   ├── images.js           ← multer, sharp, adm-zip; GET / trả thêm thumbnail_url
 │   │   │   ├── thumbnails.js       ← thumbnail cache service (STEP-1.3 MỚI)
-│   │   │   ├── annotations.js
+│   │   │   ├── annotations.js      ← STEP-3.2: ghi snapshot vào annotation_history sau mỗi save
+│   │   │   ├── history.js          ← STEP-3.2 MỚI: GET /history + POST /history/:v/revert
 │   │   │   ├── export.js           ← archiver (yolo/coco/voc)
 │   │   │   ├── stats.js
 │   │   │   ├── models.js
@@ -158,8 +159,9 @@ Roboflow - Copy/
 | **[STEP-1.1]** Inference lifecycle | `startInferenceService()` → spawn `inference_service.py` sau `app.listen()`. `stopInferenceService()` đăng ký qua `process.on('exit'/'SIGINT'/'SIGTERM')` | CONFIRMED |
 | **[STEP-1.2]** Jobs router | import + mount `routes/jobs.js` tại `/api/jobs` | CONFIRMED |
 | **[STEP-1.3]** Thumbnails router | import + mount `routes/thumbnails.js` tại `/api/images` | CONFIRMED |
+| **[STEP-3.2]** History router | import + mount `routes/history.js` tại `/api/images/:imageId` | CONFIRMED |
 | Env vars đọc | `PORT`, `PYTHON_BIN`, `INFERENCE_PORT`, `USE_LEGACY_INFER` | CONFIRMED |
-| Last verified | 2026-08-04 (STEP-1.3) | - |
+| Last verified | 2026-08-05 (STEP-3.2) | - |
 
 **Route mounting:**
 ```
@@ -173,6 +175,8 @@ Roboflow - Copy/
 /api/projects/:projectId/auto-label   → routes/autolabel.js
 /api/jobs                             → routes/jobs.js        [STEP-1.2 MỚI]
 /api/images                           → routes/thumbnails.js  [STEP-1.3 MỚI]
+/api/images/:imageId                  → routes/reviews.js     [STEP-2.3 MỚI]
+/api/images/:imageId                  → routes/history.js     [STEP-3.2 MỚI]
 ```
 
 ---
@@ -264,16 +268,17 @@ Roboflow - Copy/
 | Thuộc tính | Giá trị | Confidence |
 |---|---|---|
 | Router options | Router({ mergeParams: true }) | CONFIRMED |
-| Imports | db, nanoid | CONFIRMED |
+| Imports | db, nanoid, **pruneAnnotationHistory** (từ db.js) | CONFIRMED |
 | Callers/Used-by | index.js (mounted /api/images/:imageId/annotations) | CONFIRMED |
-| Pattern | Replace-all: DELETE + bulk INSERT trong transaction | CONFIRMED |
-| Last verified | 2026-08-04 | - |
+| Pattern | Replace-all: DELETE + bulk INSERT trong transaction; **[STEP-3.2]** thêm INSERT annotation_history snapshot + prune sau mỗi save | CONFIRMED |
+| Last verified | 2026-08-05 (STEP-3.2) | - |
 
 | Method | Path | File:Line | Mô tả |
 |---|---|---|---|
-| PUT | `/` | annotations.js:12 | Replace toàn bộ annotations của 1 ảnh; auto-update images.status |
+| PUT | `/` | annotations.js:14 | Replace toàn bộ annotations; auto-update images.status; **INSERT snapshot vào annotation_history (version=MAX+1), gọi pruneAnnotationHistory** |
 
 **Quan trọng:** Không có GET riêng — annotations được trả cùng `GET /images/:imageId` (images.js:64).
+**Depth-1 callers:** index.js (mount), history.js (dùng chung DB nhưng không import annotations.js).
 
 ---
 
@@ -378,6 +383,27 @@ Roboflow - Copy/
 | DELETE | `/:id` | jobs.js:~37 | Delete job record |
 
 **Response shape (`normalizeJob`):** `{id, projectId, status, total, done, created, failed, modelId, error, unmatchedClasses[], createdAt, updatedAt}`
+
+### 3.14 `server/src/routes/history.js` — Annotation History (STEP-3.2 MỚI)
+
+| Thuộc tính | Giá trị | Confidence |
+|---|---|---|
+| Router options | Router({ mergeParams: true }) | CONFIRMED |
+| Imports | db, nanoid, pruneAnnotationHistory (db.js), requireRole (middleware/roles.js) | CONFIRMED |
+| Callers/Used-by | index.js (mounted `/api/images/:imageId`) | CONFIRMED |
+| Last verified | 2026-08-05 (STEP-3.2) | - |
+
+| Method | Path | Role required | Mô tả |
+|---|---|---|---|
+| GET | `/history` | any authenticated | List history entries (id, version, actor_id, created_at, actor_name, actor_username) — KHÔNG kèm snapshot |
+| POST | `/history/:version/revert` | reviewer, admin | Revert về version chỉ định: ghi đè annotations từ snapshot + INSERT history entry mới (audit) + pruneAnnotationHistory |
+
+**Response GET /history:** `[{id, version, actor_id, created_at, actor_name, actor_username}]` — sắp xếp DESC theo version.
+**Response POST revert:** `{reverted_to_version: N, annotations: Annotation[]}`.
+**Role guard (AD-A5 Row 7):** annotator → 403. Annotator được xem history (GET) nhưng không được revert.
+**Watch out:** Sau revert, 1 history entry mới được tạo (version tăng tiếp) — audit trail liên tục, không bị gián đoạn.
+
+---
 
 ### 3.13 `server/src/routes/reviews.js` — Review workflow (STEP-2.3 MỚI)
 
@@ -710,7 +736,14 @@ Các interface chính:
 
 | Method | Path | File:Line | Response |
 |---|---|---|---|
-| PUT | /api/images/:iid/annotations | annotations.js:12 | Annotation[] |
+| PUT | /api/images/:iid/annotations | annotations.js:14 | Annotation[] (đồng thời INSERT snapshot vào annotation_history) |
+
+### Annotation History (STEP-3.2 MỚI)
+
+| Method | Path | File:Line | Role | Response |
+|---|---|---|---|---|
+| GET | /api/images/:iid/history | history.js:26 | any authenticated | `[{id, version, actor_id, created_at, actor_name, actor_username}]` — không có snapshot |
+| POST | /api/images/:iid/history/:version/revert | history.js:47 | reviewer, admin | `{reverted_to_version: N, annotations: Annotation[]}` |
 
 ### Export
 
@@ -881,6 +914,21 @@ Query params export: `format=yolo\|coco\|voc`, `splitMode=manual\|auto`, `trainR
 
 ---
 
+### Phase 3.2 — Annotation history + revert — ✅ HOÀN THÀNH
+
+**Files đã thay đổi (STEP-3.2):**
+- `server/src/routes/annotations.js` — import `pruneAnnotationHistory`; PUT handler: trong transaction thêm `COALESCE(MAX(version),0)+1` → INSERT snapshot → gọi `pruneAnnotationHistory(imageId)` ngoài transaction.
+- `server/src/routes/history.js` — **MỚI**: `GET /history` (list, no snapshot) + `POST /history/:version/revert` (reviewer/admin, AD-A5 Row 7).
+- `server/src/index.js` — import + mount `historyRouter` tại `/api/images/:imageId`.
+- `tests/auth.test.js` — Row 7 (3 skip → 6 test thật): 93 passed, 0 failed, 0 skipped.
+
+**Depth-1 callers của annotations.js:** không thay đổi interface PUT (input/output giống trước), chỉ thêm side-effect ghi history.
+**Depth-1 của history.js:** index.js (mount) — client chưa gọi (frontend history panel là việc của phase UI sau).
+
+**Watch out cho STEP-3.3 và 3.4:** Cả 2 bước cần sửa `annotations.js` PUT handler — 3.3 thêm `activity_log` INSERT vào transaction hiện có, 3.4 thêm `req.body.version` conflict check. Không có xung đột nếu làm tuần tự. History.js cũng có thể được cập nhật ở STEP-3.3 để ghi log khi revert.
+
+---
+
 ### Phase 3.5 — Image done status
 
 **Files bị ảnh hưởng:**
@@ -927,3 +975,4 @@ Query params export: `format=yolo\|coco\|voc`, `splitMode=manual\|auto`, `trainR
 | 2026-08-04 | senior-developer (STEP-2.2) | Bảng `users` (INTEGER id, role, color), routes auth.js/users.js, middleware, LoginPage — 87 test pass ma trận AD-A5, npm audit sạch (điều kiện #A1/#A2 đạt), §9 Phase 2.2 DONE | (STEP-2.2) |
 | 2026-08-04 | senior-developer (STEP-2.3) | Thêm §3.13 reviews.js (MỚI), cập nhật §6 bảng `images` (4 cột review), §9 Phase 2.3 DONE — review workflow submit/approve/reject, Row 8 test pass | (STEP-2.3) |
 | 2026-08-05 | senior-developer (STEP-3.1) | Cập nhật §6 — cột `annotations.version`, bảng mới `annotation_history` (snapshot), `activity_log`; §9 Phase 3.1 DONE — verify row count trước/sau (0 mất dữ liệu, CTO condition #1 đạt) | (STEP-3.1) |
+| 2026-08-05 | senior-developer (STEP-3.2) | Thêm §3.14 history.js (MỚI), cập nhật §2 (routes/history.js), §3.1 (mount /api/images/:id history), §3.6 (annotations.js + pruneAnnotationHistory), §7 (Annotation History endpoints), §9 Phase 3.2 DONE — 93 test pass (0 fail, 0 skip) | a4c3519 |

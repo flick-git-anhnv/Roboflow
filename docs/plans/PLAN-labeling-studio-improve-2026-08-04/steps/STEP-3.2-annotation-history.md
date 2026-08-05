@@ -2,8 +2,8 @@
 step: "3.2"
 plan: ../PLAN-MASTER.md
 agent: senior-developer
-status: todo
-completed_at:
+status: done
+completed_at: "2026-08-05 09:32"
 deps: ["3.1"]
 ---
 
@@ -31,26 +31,40 @@ Implement logic lưu annotation history: mỗi khi annotations của 1 ảnh đ�
 
 ## Đã làm
 
-[Điền SAU khi hoàn thành]
+1. **`server/src/routes/annotations.js`** — import `pruneAnnotationHistory` từ `db.js`; trong transaction của `PUT /`, sau khi delete+insert annotations: tính `nextVersion = MAX(version) + 1` từ `annotation_history` của ảnh đó, INSERT SNAPSHOT (`JSON.stringify(boxes)`) vào `annotation_history`, gọi `pruneAnnotationHistory(imageId)` ngoài transaction.
+
+2. **`server/src/routes/history.js`** (file mới) — 2 route, `mergeParams: true`:
+   - `GET /history` — SELECT từ `annotation_history` JOIN `users`, trả list (id, version, actor_id, created_at, actor_name, actor_username), không kèm `snapshot` (nhẹ).
+   - `POST /history/:version/revert` — `requireRole('reviewer', 'admin')` → annotator → 403; parse snapshot của version yêu cầu, trong 1 transaction: DELETE annotations hiện tại + INSERT lại từ snapshot + UPDATE images.status + INSERT 1 history entry mới (version tăng tiếp, audit trail); gọi `pruneAnnotationHistory` ngoài transaction; trả `{ reverted_to_version, annotations }`.
+
+3. **`server/src/index.js`** — thêm `import historyRouter` + `app.use('/api/images/:imageId', historyRouter)` (sau reviewsRouter).
+
+4. **`tests/auth.test.js`** — thay 3 dòng `skip` Row 7 bằng test thật: upload ảnh mới, save 2 lần (tạo version 1 và 2), GET /history xác nhận có version 1, kiểm tra annotator→403, reviewer→200+verify x=10 khớp snapshot v1, admin→200. Kết quả: **93 passed, 0 failed, 0 skipped** (trước: 87 passed, 3 skipped).
 
 ## Artifact
 
-[Điền SAU khi hoàn thành]
+- `server/src/routes/annotations.js` (sửa — thêm history snapshot logic)
+- `server/src/routes/history.js` (tạo mới)
+- `server/src/index.js` (sửa — mount historyRouter)
+- `tests/auth.test.js` (sửa — Row 7 thành test thật)
 
 ## Quyết định quan trọng
 
-[Điền SAU khi hoàn thành]
+1. **Tách history routes sang file riêng `history.js`** thay vì nhét vào `annotations.js` — giữ annotations.js gọn (chỉ PUT save), đúng với pattern project (reviews.js tương tự).
+2. **URL paths `/api/images/:imageId/history/*`** (không phải `.../annotations/history/*`) — mount historyRouter tại `/api/images/:imageId`, đồng bộ với comment skip ban đầu trong test.
+3. **`pruneAnnotationHistory` gọi ngoài transaction** — tránh nested-transaction không cần thiết; prune là cleanup, không cần rollback cùng transaction chính.
+4. **Không cập nhật `annotations.version` column** (cột đó dành cho STEP-3.4 optimistic locking); version tracking của history dùng MAX(version) trong `annotation_history` table.
 
 ## Handoff Payload — bước sau đọc phần này
 
-- do_not_redo: Không có
-- watch_out: Không có
-- next_inputs: Không có
+- do_not_redo: `GET /api/images/:imageId/history` và `POST /api/images/:imageId/history/:version/revert` đã implement và test. `pruneAnnotationHistory` đã được gọi sau mỗi INSERT vào annotation_history (cả trong PUT save và trong revert). KHÔNG implement lại.
+- watch_out: STEP-3.3 (activity_log) cũng cần sửa `annotations.js` (ghi log action `annotation_saved`) — file `annotations.js` sẽ có xung đột nhỏ nếu cả 3.3 và 3.4 cùng sửa đồng thời. STEP-3.4 (optimistic locking) cần thêm field `version` vào PUT request body và check conflict — đụng trực tiếp `annotations.js` PUT handler đã sửa ở bước này. Ghi chú: hiện PUT handler của `annotations.js` KHÔNG đọc `req.body.version` — STEP-3.4 cần thêm logic đó.
+- next_inputs: `server/src/routes/annotations.js` (đã có history snapshot, STEP-3.3 cần thêm activity_log INSERT vào cùng transaction). `server/src/routes/history.js` (STEP-3.3 có thể thêm log khi revert). Bảng `activity_log` đã có từ STEP-3.1. DB_PATH và pruneAnnotationHistory đã export sẵn từ `db.js`.
 
 ## Commit
 
-- Hash: [điền sau khi commit]
-- Đã push: [có/không]
+- Hash: a4c3519
+- Đã push: có (origin/Improve)
 
 ---
 **Status icons:** ⬜ Todo | 🔄 In Progress | ✅ Done | 🛑 Blocked | ⏭️ Skipped

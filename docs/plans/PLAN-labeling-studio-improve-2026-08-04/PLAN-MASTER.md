@@ -1,7 +1,7 @@
 ---
 task: labeling-studio-improve
 created: 2026-08-04
-updated: 2026-08-05 09:24
+updated: 2026-08-05 09:32
 status: active
 workflow: WF-FEATURE (đa phase)
 priority: P1
@@ -78,7 +78,7 @@ Stack hiện tại: `server/src/` (Express, better-sqlite3, raw SQL), `client/sr
 | # | Bước | Agent | Status | Step file | Hoàn thành lúc |
 |---|------|-------|--------|-----------|-----------------|
 | 3.1 | DB Migration: `annotation_history`, `activity_log` (với `actor_id` FK), cột `version` vào `annotations` ⚠️ CTO/EM+security-audit | senior-developer + cto | ✅ | `steps/STEP-3.1-db-migration-schema.md` | 2026-08-05 09:24 |
-| 3.2 | Annotation history + audit trail (API + lưu snapshot trước/sau mỗi save + actor_id) | senior-developer | ⬜ | `steps/STEP-3.2-annotation-history.md` | - |
+| 3.2 | Annotation history + audit trail (API + lưu snapshot trước/sau mỗi save + actor_id) | senior-developer | ✅ | `steps/STEP-3.2-annotation-history.md` | 2026-08-05 09:32 |
 | 3.3 | Activity log cấp project (upload/export/đổi split, timestamp, actor_id) | junior-developer | ⬜ | `steps/STEP-3.3-activity-log.md` | - |
 | 3.4 | Optimistic locking / conflict detection annotation (dựa trên cột `version`) | senior-developer | ⬜ | `steps/STEP-3.4-optimistic-locking.md` | - |
 | 3.5 | Đánh dấu ảnh "Xong" (done): cột `completed_at` + `completed_by` FK → `users` vào `images`; UI nút/phím tắt confirm done | senior-developer | ⬜ | `steps/STEP-3.5-image-done-status.md` | - |

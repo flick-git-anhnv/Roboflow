@@ -2,8 +2,8 @@
 step: "5.4"
 plan: ../PLAN-MASTER.md
 agent: senior-developer
-status: todo
-completed_at:
+status: done
+completed_at: 2026-08-05 11:32
 deps: ["1.3"]
 ---
 
@@ -30,26 +30,42 @@ Thêm chế độ grid/filmstrip: ProjectDetailPage hiển thị thumbnails nhi�
 
 ## Đã làm
 
-[Điền SAU khi hoàn thành]
+1. **client/src/pages/AnnotatorPage.tsx** — thêm:
+   - `showFilmstrip` state init từ `localStorage.getItem('filmstrip_visible')` (default true).
+   - `filmstripRef` (HTMLDivElement) để auto-scroll.
+   - `goToImageId(id)` — navigate `/projects/:projectId/annotate/:id` (dùng lại navigate hook hiện có).
+   - `toggleFilmstrip()` — flip state + `localStorage.setItem`.
+   - `useEffect([imageId, showFilmstrip])` — auto-scroll filmstrip để ảnh đang mở luôn visible (scrollIntoView center).
+   - Toolbar: nút toggle `▼/▲ Dải ảnh` (fontSize 12, btn-outline) — chèn sau zoom-controls.
+   - `.annotator-layout` div: thêm `style={showFilmstrip ? { height: 'calc(100vh - 246px)' } : undefined}` để thu hẹp canvas khi filmstrip hiện.
+   - Filmstrip JSX sau `.annotator-layout`: render toàn bộ `images` array, mỗi item là `filmstrip-thumb` div với `data-id`, `loading="lazy"` img `/api/images/:id/thumb?size=80`, badge ưu tiên review > completed > labeled/unlabeled.
+
+2. **client/src/styles.css** — thêm `.filmstrip`, `.filmstrip-thumb`, `.filmstrip-thumb.active`, `.filmstrip-badge` và webkit scrollbar cho filmstrip.
 
 ## Artifact
 
-[Điền SAU khi hoàn thành]
+- `client/src/pages/AnnotatorPage.tsx` — filmstrip state + logic + JSX
+- `client/src/styles.css` — filmstrip CSS classes
 
 ## Quyết định quan trọng
 
-[Điền SAU khi hoàn thành]
+1. **Không dùng IntersectionObserver tự viết**: browser native `loading="lazy"` đủ cho web — các thumb ngoài viewport không load cho đến khi scroll tới. Tool cũ (Python filmstrip.py) cần batch manual vì không có browser native; trên web không cần.
+2. **Thumbnail endpoint**: dùng thẳng `/api/images/:id/thumb?size=80` (STEP-1.3 đã có) — không cần `thumbnail_url` field vì thumbnail_url có thể undefined. Size 80px phù hợp với filmstrip height 80px.
+3. **Vị trí filmstrip**: ngang phía dưới canvas (trong `annotator-layout` grid) — không làm side panel dọc để không phá vỡ layout grid 3 cột hiện tại.
+4. **Height canvas**: dùng inline style override `.annotator-layout` height khi filmstrip visible (`calc(100vh - 246px)` = 130px toolbar + 108px filmstrip + 8px margin). Đơn giản hơn flex container.
+5. **Badge priority**: review_status > completed_at > labeled/unlabeled — màu sắc copy đúng từ ProjectDetailPage để nhất quán UX.
+6. **localStorage key**: `filmstrip_visible` (string 'true'/'false'). Mặc định hiện (không phải 'false' → show).
 
 ## Handoff Payload — bước sau đọc phần này
 
-- do_not_redo: Không có
-- watch_out: Không có
-- next_inputs: Không có
+- do_not_redo: Không thêm filmstrip lần nữa. Không thêm `showFilmstrip`/`filmstripRef`/`goToImageId`/`toggleFilmstrip` vào AnnotatorPage (đã có). Không thêm `.filmstrip*` CSS (đã có trong styles.css). Không dùng IntersectionObserver — native lazy load đã đủ.
+- watch_out: Phím tắt đã có trong AnnotatorPage: Ctrl+Z/Y/Shift+Z, ArrowLeft/Right, Delete/Backspace, Escape, D, Space, 1-9, Alt+C. Bước 5.5 (quick class switcher) cần thêm phím tắt mới — tránh xung đột với các phím đã dùng. `goToImageId` và `toggleFilmstrip` đã là callback trong AnnotatorPage — không khai báo lại. `showFilmstrip` state mới trong AnnotatorPage dùng `localStorage.getItem('filmstrip_visible')`.
+- next_inputs: Commit hash `a72b38c`. File `client/src/pages/AnnotatorPage.tsx` tại commit này — có filmstrip state/logic đầy đủ. File `client/src/styles.css` tại commit này — có filmstrip CSS.
 
 ## Commit
 
-- Hash: [điền sau khi commit]
-- Đã push: [có/không]
+- Hash: a72b38c
+- Đã push: có — branch `Improve`
 
 ---
 **Status icons:** ⬜ Todo | 🔄 In Progress | ✅ Done | 🛑 Blocked | ⏭️ Skipped

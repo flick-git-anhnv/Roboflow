@@ -12,6 +12,17 @@ export function clearAuth() {
   sessionStorage.removeItem('kztek_user');
 }
 
+// Đọc user hiện tại từ sessionStorage (cùng cách App.tsx cache sau getMe()).
+// Không dùng React Context — codebase này không có state library, giữ nhất quán.
+export function getCurrentUser(): User | null {
+  try {
+    const raw = sessionStorage.getItem('kztek_user');
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
 // ── Core request wrapper ───────────────────────────────────────────────────────
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const token = getToken();
@@ -139,6 +150,14 @@ export const api = {
     }),
   getAutoLabelJob: (projectId: string, jobId: string) =>
     request<AutoLabelJob>(`/api/projects/${projectId}/auto-label/${jobId}`),
+
+  // ── Review workflow (STEP-2.3) ───────────────────────────────────────────────
+  submitReview: (imageId: string) =>
+    request<ImageItem>(`/api/images/${imageId}/submit-review`, { method: 'POST', body: JSON.stringify({}) }),
+  approveReview: (imageId: string) =>
+    request<ImageItem>(`/api/images/${imageId}/approve`, { method: 'POST', body: JSON.stringify({}) }),
+  rejectReview: (imageId: string, comment: string) =>
+    request<ImageItem>(`/api/images/${imageId}/reject`, { method: 'POST', body: JSON.stringify({ comment }) }),
 };
 
 export interface SplitOptions {

@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { api } from '../api';
+import { api, getCurrentUser } from '../api';
 import type { Annotation, ClassLabel, ImageItem, ImageWithAnnotations, Point } from '../types';
+
+const REVIEW_LABEL: Record<string, string> = {
+  draft: 'Nháp',
+  in_review: 'Chờ duyệt',
+  approved: 'Đã duyệt',
+  rejected: 'Bị từ chối',
+};
 
 interface Box {
   id: string;
@@ -29,6 +36,9 @@ export default function AnnotatorPage() {
   const [activeClassId, setActiveClassId] = useState<string>('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<'saved' | 'dirty' | 'saving'>('saved');
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const currentUser = getCurrentUser();
+  const canReview = currentUser?.role === 'reviewer' || currentUser?.role === 'admin';
   const [tool, setTool] = useState<Tool>('bbox');
   const [drawingPoints, setDrawingPoints] = useState<Point[]>([]);
   const [mousePos, setMousePos] = useState<Point | null>(null);
@@ -81,6 +91,47 @@ export default function AnnotatorPage() {
   }, [images, currentIndex, navigate, projectId]);
 
   const classById = useMemo(() => new Map(classes.map((c) => [c.id, c])), [classes]);
+
+  // ── Review workflow (STEP-2.3) ────────────────────────────────────────────────
+  const handleSubmitReview = useCallback(async () => {
+    if (!image) return;
+    setReviewBusy(true);
+    try {
+      const updated = await api.submitReview(image.id);
+      setImage((img) => (img ? { ...img, review_status: updated.review_status, review_comment: updated.review_comment } : img));
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Gửi duyệt thất bại');
+    } finally {
+      setReviewBusy(false);
+    }
+  }, [image]);
+
+  const handleApprove = useCallback(async () => {
+    if (!image) return;
+    setReviewBusy(true);
+    try {
+      const updated = await api.approveReview(image.id);
+      setImage((img) => (img ? { ...img, review_status: updated.review_status, review_comment: updated.review_comment } : img));
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Duyệt thất bại');
+    } finally {
+      setReviewBusy(false);
+    }
+  }, [image]);
+
+  const handleReject = useCallback(async () => {
+    if (!image) return;
+    const comment = window.prompt('Lý do từ chối (annotator sẽ thấy):', '') || '';
+    setReviewBusy(true);
+    try {
+      const updated = await api.rejectReview(image.id, comment);
+      setImage((img) => (img ? { ...img, review_status: updated.review_status, review_comment: updated.review_comment } : img));
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Từ chối thất bại');
+    } finally {
+      setReviewBusy(false);
+    }
+  }, [image]);
 
   const scheduleSave = useCallback((nextBoxes: Box[]) => {
     setSaveState('dirty');
@@ -530,6 +581,30 @@ export default function AnnotatorPage() {
         <span className={`save-status ${saveState}`}>
           {saveState === 'saved' ? '✓ Đã lưu' : saveState === 'saving' ? 'Đang lưu...' : 'Chưa lưu...'}
         </span>
+
+        <div className="review-actions" style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
+          {image.review_status && image.review_status !== 'draft' && (
+            <span style={{
+              fontSize: 12, padding: '3px 8px', borderRadius: 4, color: '#fff',
+              background: image.review_status === 'approved' ? '#2e7d32' :
+                image.review_status === 'rejected' ? '#F05922' : '#4A3F8C',
+            }}
+              title={image.review_comment || ''}>
+              {REVIEW_LABEL[image.review_status]}
+            </span>
+          )}
+          {!canReview && (!image.review_status || image.review_status === 'draft' || image.review_status === 'rejected') && (
+            <button className="btn btn-outline" disabled={reviewBusy} onClick={handleSubmitReview}>
+              📤 Gửi duyệt
+            </button>
+          )}
+          {canReview && image.review_status === 'in_review' && (
+            <>
+              <button className="btn btn-outline" disabled={reviewBusy} onClick={handleApprove}>✓ Duyệt</button>
+              <button className="btn btn-outline" disabled={reviewBusy} onClick={handleReject}>✕ Từ chối</button>
+            </>
+          )}
+        </div>
       </div>
 
       {tool === 'quad' && (

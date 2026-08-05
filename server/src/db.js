@@ -165,3 +165,33 @@ function m003_add_users() {
 }
 
 m003_add_users();
+
+// ─── m004_add_review_status ────────────────────────────────────────────────────
+// STEP-2.3: Review workflow — thêm 4 cột review vào bảng images.
+// review_status lifecycle: 'draft' → 'in_review' → 'approved' | 'rejected'
+//
+// ⚠️ STEP-3.5 NOTE: Sau khi STEP-3.5 thêm completed_at/completed_by vào images,
+// route submit-review nên check completed_at IS NOT NULL thay vì status='labeled'.
+// Hiện tại dùng status='labeled' tạm thời — ghi chú để Phase 3 cập nhật lại.
+//
+// reviewed_by: FK → users(id) INTEGER (nullable khi chưa review)
+function m004_add_review_status() {
+  const imgCols = db.prepare("PRAGMA table_info(images)").all().map((c) => c.name);
+  if (!imgCols.includes('review_status')) {
+    db.exec("ALTER TABLE images ADD COLUMN review_status TEXT NOT NULL DEFAULT 'draft'");
+  }
+  if (!imgCols.includes('review_comment')) {
+    db.exec('ALTER TABLE images ADD COLUMN review_comment TEXT');
+  }
+  if (!imgCols.includes('reviewed_by')) {
+    // FK → users(id): SQLite không enforce FK qua ALTER TABLE CHECK,
+    // nhưng foreign_keys=ON đảm bảo runtime constraint khi INSERT/UPDATE.
+    db.exec('ALTER TABLE images ADD COLUMN reviewed_by INTEGER REFERENCES users(id)');
+  }
+  if (!imgCols.includes('reviewed_at')) {
+    db.exec('ALTER TABLE images ADD COLUMN reviewed_at TEXT');
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS idx_images_review_status ON images(review_status)');
+}
+
+m004_add_review_status();

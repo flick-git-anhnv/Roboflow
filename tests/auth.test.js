@@ -304,11 +304,69 @@ async function runTests() {
   skip('POST /api/images/:id/history/:v/revert [reviewer → 200]',  'Phase 3 route not yet implemented');
   skip('POST /api/images/:id/history/:v/revert [admin → 200]',     'Phase 3 route not yet implemented');
 
-  // ── Row 8: Review workflow — PENDING (Phase 2.3 route) ──────────────────
+  // ── Row 8: Review workflow (Phase 2.3) ───────────────────────────────────
   console.log('\n── Row 8: Review workflow ──');
-  skip('Review approve/reject [annotator → 403]', 'Phase 2.3 route not yet implemented');
-  skip('Review approve/reject [reviewer → 200]',  'Phase 2.3 route not yet implemented');
-  skip('Review approve/reject [admin → 200]',     'Phase 2.3 route not yet implemented');
+  const img8 = await (await uploadImage(PID, annotatorToken)).json();
+  const img8Id = img8[0].id;
+
+  // annotator submits for review (own image, draft → in_review)
+  await checkStatus(
+    'POST submit-review [annotator → 200]',
+    () => post(`/api/images/${img8Id}/submit-review`, {}, annotatorToken),
+    200
+  );
+
+  // annotator cannot approve/reject (reviewer-only actions)
+  await checkStatus(
+    'POST approve [annotator → 403]',
+    () => post(`/api/images/${img8Id}/approve`, {}, annotatorToken),
+    403
+  );
+  await checkStatus(
+    'POST reject [annotator → 403]',
+    () => post(`/api/images/${img8Id}/reject`, { comment: 'x' }, annotatorToken),
+    403
+  );
+
+  // reviewer approves (in_review → approved)
+  await checkStatus(
+    'POST approve [reviewer → 200]',
+    () => post(`/api/images/${img8Id}/approve`, {}, reviewerToken),
+    200
+  );
+
+  // second image: reviewer rejects with comment (in_review → rejected)
+  const img8b = await (await uploadImage(PID, annotatorToken)).json();
+  const img8bId = img8b[0].id;
+  await post(`/api/images/${img8bId}/submit-review`, {}, annotatorToken);
+  const rejectRes = await checkStatus(
+    'POST reject [reviewer → 200]',
+    () => post(`/api/images/${img8bId}/reject`, { comment: 'Cần chỉnh lại bbox' }, reviewerToken),
+    200
+  );
+  const rejected = await rejectRes.json();
+  ok(
+    'Reject lưu đúng review_comment',
+    rejected.review_comment === 'Cần chỉnh lại bbox',
+    `got '${rejected.review_comment}'`
+  );
+
+  // admin can approve too (third image)
+  const img8c = await (await uploadImage(PID, annotatorToken)).json();
+  const img8cId = img8c[0].id;
+  await post(`/api/images/${img8cId}/submit-review`, {}, annotatorToken);
+  await checkStatus(
+    'POST approve [admin → 200]',
+    () => post(`/api/images/${img8cId}/approve`, {}, adminToken),
+    200
+  );
+
+  // unauthenticated → 401
+  await checkStatus(
+    'POST approve [unauthenticated → 401]',
+    () => post(`/api/images/${img8Id}/approve`, {}, null),
+    401
+  );
 
   // ── Row 9: CRUD classes — all roles 200/201/204 ──────────────────────────
   console.log('\n── Row 9: CRUD classes (all roles) ──');

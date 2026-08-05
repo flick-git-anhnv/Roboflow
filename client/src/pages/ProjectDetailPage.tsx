@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { api } from '../api';
+import { api, getCurrentUser } from '../api';
 import type { ClassLabel, ImageItem, Project, Split } from '../types';
 import { getFilesFromDataTransfer, isImageFile, isZipFile } from '../utils/files';
 import StatsPanel from '../components/StatsPanel';
@@ -9,6 +9,14 @@ import AutoLabelModal from '../components/AutoLabelModal';
 
 type StatusFilter = 'all' | 'labeled' | 'unlabeled';
 type SplitFilter = 'all' | Split;
+type ReviewFilter = 'all' | 'draft' | 'in_review' | 'approved' | 'rejected';
+
+const REVIEW_LABEL: Record<string, string> = {
+  draft: 'Nháp',
+  in_review: 'Chờ duyệt',
+  approved: 'Đã duyệt',
+  rejected: 'Bị từ chối',
+};
 
 export default function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -29,6 +37,9 @@ export default function ProjectDetailPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [classFilter, setClassFilter] = useState<string>('all');
   const [splitFilter, setSplitFilter] = useState<SplitFilter>('all');
+  const [reviewFilter, setReviewFilter] = useState<ReviewFilter>('all');
+  const currentUser = getCurrentUser();
+  const canReview = currentUser?.role === 'reviewer' || currentUser?.role === 'admin';
 
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(60);
@@ -131,22 +142,24 @@ export default function ProjectDetailPage() {
       if (statusFilter !== 'all' && img.status !== statusFilter) return false;
       if (splitFilter !== 'all' && img.split !== splitFilter) return false;
       if (classFilter !== 'all' && !(img.class_ids || []).includes(classFilter)) return false;
+      if (reviewFilter !== 'all' && (img.review_status || 'draft') !== reviewFilter) return false;
       if (q && !img.original_name.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [images, search, statusFilter, splitFilter, classFilter]);
+  }, [images, search, statusFilter, splitFilter, classFilter, reviewFilter]);
 
   const resetFilters = () => {
     setSearch('');
     setStatusFilter('all');
     setClassFilter('all');
     setSplitFilter('all');
+    setReviewFilter('all');
   };
 
-  const hasActiveFilters = search || statusFilter !== 'all' || classFilter !== 'all' || splitFilter !== 'all';
+  const hasActiveFilters = search || statusFilter !== 'all' || classFilter !== 'all' || splitFilter !== 'all' || reviewFilter !== 'all';
 
   // Quay về trang 1 mỗi khi bộ lọc hoặc kích thước trang thay đổi
-  useEffect(() => { setPage(1); }, [search, statusFilter, classFilter, splitFilter, pageSize]);
+  useEffect(() => { setPage(1); }, [search, statusFilter, classFilter, splitFilter, reviewFilter, pageSize]);
 
   const pageCount = Math.max(1, Math.ceil(filteredImages.length / pageSize));
   const currentPage = Math.min(page, pageCount);
@@ -256,6 +269,15 @@ export default function ProjectDetailPage() {
               <option value="valid">valid</option>
               <option value="test">test</option>
             </select>
+            {canReview && (
+              <select value={reviewFilter} onChange={(e) => setReviewFilter(e.target.value as ReviewFilter)}>
+                <option value="all">Tất cả review</option>
+                <option value="in_review">Cần review</option>
+                <option value="approved">Đã duyệt</option>
+                <option value="rejected">Bị từ chối</option>
+                <option value="draft">Nháp</option>
+              </select>
+            )}
             {hasActiveFilters && (
               <button className="btn btn-outline" onClick={resetFilters}>Xoá bộ lọc</button>
             )}
@@ -281,6 +303,26 @@ export default function ProjectDetailPage() {
                   <span className={`badge ${img.status === 'labeled' ? 'labeled' : ''}`}>
                     {img.status === 'labeled' ? 'Đã gán' : 'Chưa gán'}
                   </span>
+                  {img.review_status && img.review_status !== 'draft' && (
+                    <span
+                      className={`review-badge review-${img.review_status}`}
+                      title={img.review_comment || ''}
+                      style={{
+                        position: 'absolute',
+                        top: 4,
+                        left: 4,
+                        fontSize: 11,
+                        padding: '2px 6px',
+                        borderRadius: 4,
+                        color: '#fff',
+                        background:
+                          img.review_status === 'approved' ? '#2e7d32' :
+                          img.review_status === 'rejected' ? '#F05922' : '#4A3F8C',
+                      }}
+                    >
+                      {REVIEW_LABEL[img.review_status]}
+                    </span>
+                  )}
                   <span className="split-badge"
                     onClick={(e) => {
                       e.preventDefault();

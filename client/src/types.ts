@@ -45,6 +45,10 @@ export interface ImageItem {
   created_at: string;
   class_ids: string[];
   thumbnail_url?: string;
+  review_status?: 'draft' | 'in_review' | 'approved' | 'rejected';
+  review_comment?: string | null;
+  reviewed_by?: number | null;
+  reviewed_at?: string | null;
 }
 
 export type AnnotationType = 'bbox' | 'quad';

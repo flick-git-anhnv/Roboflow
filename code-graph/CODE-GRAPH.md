@@ -379,6 +379,23 @@ Roboflow - Copy/
 
 **Response shape (`normalizeJob`):** `{id, projectId, status, total, done, created, failed, modelId, error, unmatchedClasses[], createdAt, updatedAt}`
 
+### 3.13 `server/src/routes/reviews.js` — Review workflow (STEP-2.3 MỚI)
+
+| Thuộc tính | Giá trị | Confidence |
+|---|---|---|
+| Router options | Router({ mergeParams: true }) | CONFIRMED |
+| Imports | db, requireRole (middleware/roles.js) | CONFIRMED |
+| Callers/Used-by | index.js (mounted `/api/images/:imageId`) | CONFIRMED |
+| Last verified | 2026-08-04 (STEP-2.3) | - |
+
+| Method | Path | Role required | Mô tả |
+|---|---|---|---|
+| POST | `/submit-review` | annotator, admin | draft\|rejected → in_review |
+| POST | `/approve` | reviewer, admin | in_review → approved |
+| POST | `/reject` | reviewer, admin | in_review → rejected (body: `{comment}`) |
+
+Lifecycle: `draft → in_review → approved` hoặc `→ rejected → (submit lại) → in_review`. Conflict trạng thái sai → 409 `REVIEW_STATUS_CONFLICT`.
+
 ---
 
 ## 4. Module map — Client
@@ -566,8 +583,14 @@ Các interface chính:
 | split | TEXT | NOT NULL DEFAULT 'train' (train/valid/test) |
 | status | TEXT | NOT NULL DEFAULT 'unlabeled' (unlabeled/labeled) |
 | created_at | TEXT | NOT NULL DEFAULT datetime('now') |
+| review_status | TEXT | NOT NULL DEFAULT 'draft' — STEP-2.3 MỚI (draft→in_review→approved\|rejected) |
+| review_comment | TEXT | nullable — STEP-2.3 MỚI (lý do reject) |
+| reviewed_by | INTEGER | FK→users(id), nullable — STEP-2.3 MỚI |
+| reviewed_at | TEXT | nullable — STEP-2.3 MỚI |
 
-**Index:** `idx_images_project ON images(project_id)`
+**Index:** `idx_images_project ON images(project_id)`, `idx_images_review_status ON images(review_status)` (STEP-2.3 MỚI)
+
+**⚠️ Lưu ý cho STEP-3.5:** `submit-review` hiện cho phép bất kỳ ảnh draft/rejected nào (không check `completed_at`). Khi STEP-3.5 thêm `completed_at`/`completed_by`, sửa `reviews.js` để check `completed_at IS NOT NULL` trước khi cho submit-review.
 
 ### Bảng `annotations`
 
@@ -794,15 +817,24 @@ Query params export: `format=yolo\|coco\|voc`, `splitMode=manual\|auto`, `trainR
 
 ---
 
-### Phase 2.2 — Auth implementation
+### Phase 2.2 — Auth implementation — ✅ HOÀN THÀNH
 
 **Files bị ảnh hưởng:**
-- `server/src/db.js` — thêm `CREATE TABLE IF NOT EXISTS users (...)` + `sessions` table
-- `server/src/index.js` — mount authRouter, thêm auth middleware global (hoặc per-router)
-- Tạo mới: `server/src/routes/auth.js`, `server/src/middleware/auth.js`
-- `client/src/api.ts` — thêm `login`, `logout`, `getMe`; gắn Authorization header vào `request()`
-- `client/src/types.ts` — thêm `User` interface
-- `client/src/App.tsx` — thêm route `/login`, guard AuthRoute
+- `server/src/db.js` — bảng `users` (INTEGER AUTOINCREMENT id, username, password_hash, display_name, role, color, created_at, is_active)
+- `server/src/index.js` — mount `auth.js`/`users.js`, middleware auth
+- Tạo mới: `server/src/routes/auth.js`, `server/src/routes/users.js`, `server/src/middleware/`, `server/src/lib/`
+- `client/src/api.ts`, `client/src/types.ts`, `client/src/App.tsx`, `client/src/pages/LoginPage.tsx`
+- Test: `tests/auth.test.js` — 87 passed theo ma trận AD-A5 (2 điều kiện CTO #A1/#A2 đạt)
+
+### Phase 2.3 — Review workflow — ✅ HOÀN THÀNH
+
+**Files bị ảnh hưởng:**
+- `server/src/db.js` — `m004_add_review_status()`: 4 cột mới trên `images` (`review_status`, `review_comment`, `reviewed_by`, `reviewed_at`) + index
+- Tạo mới: `server/src/routes/reviews.js` (xem §3.13)
+- `server/src/index.js` — mount `reviewsRouter` tại `/api/images/:imageId`
+- Test: `tests/auth.test.js` Row 8 — 8 test case pass (submit-review, approve, reject, comment, role guard, 401)
+
+**Watch out cho STEP-3.5:** `submit-review` hiện không check `completed_at` (field đó chưa tồn tại) — khi STEP-3.5 xong, cập nhật điều kiện submit trong `reviews.js`.
 
 ---
 
@@ -860,3 +892,6 @@ Query params export: `format=yolo\|coco\|voc`, `splitMode=manual\|auto`, `trainR
 | 2026-08-04 | senior-developer (STEP-1.1) | Cập nhật §3.10 autolabel.js (HTTP mode + legacy rollback), thêm §5.2 inference_service.py, cập nhật §8 Python deps, §9 Phase 1.1 DONE | (STEP-1.1) |
 | 2026-08-04 | senior-developer (STEP-1.2) | Thêm §3.11 jobs.js (MỚI), cập nhật §2 (migrations/ + jobs.js), §3.1 (route /api/jobs), §3.2 (startup cleanup), §3.10 (DB-backed job storage), §6 (jobs table schema), §7 (/api/jobs endpoints), §9 Phase 1.2 DONE | (STEP-1.2) |
 | 2026-08-04 | junior-developer (STEP-1.3) | Thêm §3.12 thumbnails.js (MỚI), cập nhật §1 (data/thumbnails/), §2 (thư mục + route), §3.1 (mount /api/images), §3.5 (thumbnail_url field), §4.3 (ImageItem.thumbnail_url), §7 (/api/images/:id/thumb), §9 Phase 1.3 DONE | (STEP-1.3) |
+| 2026-08-04 | tech-lead+cto+em (STEP-2.1) | Auth ADR riêng (`ADR-auth-labeling-studio.md`), security-audit-stride, CTO+EM APPROVED kèm điều kiện #A1/#A2 | (STEP-2.1) |
+| 2026-08-04 | senior-developer (STEP-2.2) | Bảng `users` (INTEGER id, role, color), routes auth.js/users.js, middleware, LoginPage — 87 test pass ma trận AD-A5, npm audit sạch (điều kiện #A1/#A2 đạt), §9 Phase 2.2 DONE | (STEP-2.2) |
+| 2026-08-04 | senior-developer (STEP-2.3) | Thêm §3.13 reviews.js (MỚI), cập nhật §6 bảng `images` (4 cột review), §9 Phase 2.3 DONE — review workflow submit/approve/reject, Row 8 test pass | (STEP-2.3) |

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, getCurrentUser } from '../api';
-import type { Annotation, ClassLabel, ImageItem, ImageWithAnnotations, Point } from '../types';
+import type { Annotation, ClassLabel, ImageItem, ImageWithAnnotations, Point, SuggestedBox } from '../types';
 
 const REVIEW_LABEL: Record<string, string> = {
   draft: 'Nháp',
@@ -60,6 +60,10 @@ export default function AnnotatorPage() {
   const [zoom, setZoom] = useState(1);
   const [spaceHeld, setSpaceHeld] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
+  /** STEP-4.2: trạng thái gọi prefill tự động khi mở ảnh chưa có annotation. */
+  const [prefillLoading, setPrefillLoading] = useState(false);
+  /** STEP-4.2: số gợi ý vừa load — hiện banner thông báo để user biết. */
+  const [prefillCount, setPrefillCount] = useState(0);
   const pendingScrollRef = useRef<{ left: number; top: number } | null>(null);
 
   useEffect(() => {
@@ -73,10 +77,17 @@ export default function AnnotatorPage() {
 
   useEffect(() => {
     if (!projectId || !imageId) return;
+    let cancelled = false;
+
     setImgEl(null);
+    setPrefillLoading(false);
+    setPrefillCount(0);
+
     api.getImage(projectId, imageId).then((img) => {
+      if (cancelled) return;
       setImage(img);
-      setBoxes(img.annotations.map((a: Annotation) => annotationToBox(a)));
+      const imgBoxes = img.annotations.map((a: Annotation) => annotationToBox(a));
+      setBoxes(imgBoxes);
       setSelectedId(null);
       setDrawingPoints([]);
       setSaveState('saved');
@@ -84,9 +95,32 @@ export default function AnnotatorPage() {
       // STEP-3.4: ghi nhớ version để dùng làm expectedVersion khi save
       annotationVersionRef.current = img.annotationVersion ?? 0;
       const el = new window.Image();
-      el.onload = () => setImgEl(el);
+      el.onload = () => { if (!cancelled) setImgEl(el); };
       el.src = `/uploads/${projectId}/${img.filename}`;
+
+      // STEP-4.2: auto-prefill khi ảnh chưa có annotation nào
+      // Dùng setBoxes (không qua updateBoxes) → KHÔNG trigger scheduleSave.
+      // User phải thực hiện thay đổi thực sự trước khi gợi ý được lưu vào DB.
+      if (imgBoxes.length === 0) {
+        setPrefillLoading(true);
+        api.getPrefill(projectId, imageId)
+          .then((data) => {
+            if (cancelled) return;
+            setPrefillLoading(false);
+            if (data.suggestions.length > 0) {
+              setBoxes(data.suggestions.map(suggestionToBox));
+              setPrefillCount(data.suggestions.length);
+            }
+          })
+          .catch(() => {
+            // Lỗi prefill (422 chưa có model, 503 service down...) → bỏ qua,
+            // không hiển thị lỗi — prefill là tính năng phụ trợ, không block UX.
+            if (!cancelled) setPrefillLoading(false);
+          });
+      }
     });
+
+    return () => { cancelled = true; };
   }, [projectId, imageId]);
 
   const currentIndex = useMemo(() => images.findIndex((i) => i.id === imageId), [images, imageId]);
@@ -213,6 +247,8 @@ export default function AnnotatorPage() {
   }, [imageId, projectId]);
 
   const updateBoxes = (updater: (prev: Box[]) => Box[]) => {
+    // STEP-4.2: user bắt đầu chỉnh sửa → dismiss prefill banner
+    setPrefillCount(0);
     setBoxes((prev) => {
       const next = updater(prev);
       scheduleSave(next);
@@ -704,6 +740,32 @@ export default function AnnotatorPage() {
         </div>
       </div>
 
+      {/* STEP-4.2: banner prefill — loading hoặc kết quả */}
+      {prefillLoading && (
+        <div style={{
+          background: '#f0f4ff', borderBottom: '1px solid #B8B3D6',
+          padding: '6px 14px', fontSize: 12.5, color: '#4A3F8C',
+        }}>
+          ⏳ Đang tải gợi ý bbox từ model...
+        </div>
+      )}
+      {!prefillLoading && prefillCount > 0 && (
+        <div style={{
+          background: '#fff8f0', borderBottom: '1px solid #FFAA80',
+          padding: '6px 14px', fontSize: 12.5, color: '#8a4000',
+          display: 'flex', alignItems: 'center', gap: 10,
+        }}>
+          <span>💡 {prefillCount} gợi ý bbox từ model mặc định. Sửa hoặc xoá rồi lưu để xác nhận.</span>
+          <button
+            className="btn btn-outline"
+            style={{ fontSize: 11, padding: '1px 8px' }}
+            onClick={() => updateBoxes(() => [])}
+          >
+            Bỏ tất cả gợi ý
+          </button>
+        </div>
+      )}
+
       {tool === 'quad' && (
         <div className="hint-text">
           <span>
@@ -823,6 +885,17 @@ function annotationToBox(a: Annotation): Box {
 
 function clamp(v: number, min: number, max: number) {
   return Math.max(min, Math.min(max, v));
+}
+
+/** STEP-4.2: Chuyển SuggestedBox (từ /prefill) → Box (state nội bộ AnnotatorPage).
+ *  ID dùng prefix "suggest_" để phân biệt nguồn gốc (không ảnh hưởng logic save). */
+function suggestionToBox(s: SuggestedBox): Box {
+  const id = `suggest_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  if (s.type === 'quad' && s.points && s.points.length === 4) {
+    return { id, class_id: s.class_id, type: 'quad', x: s.x, y: s.y, w: s.w, h: s.h,
+      points: s.points as [Point, Point, Point, Point] };
+  }
+  return { id, class_id: s.class_id, type: 'bbox', x: s.x, y: s.y, w: s.w, h: s.h };
 }
 
 function effectiveHotkey(cls: ClassLabel, idx: number): string | null {

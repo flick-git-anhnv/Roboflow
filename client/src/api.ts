@@ -1,4 +1,4 @@
-import type { Annotation, AutoLabelJob, ClassLabel, ImageItem, ImageWithAnnotations, ModelInfo, Project, User } from './types';
+import type { Annotation, AutoLabelJob, ClassLabel, ImageItem, ImageWithAnnotations, ModelInfo, Project, SuggestedBox, User } from './types';
 
 // ── Token helpers ──────────────────────────────────────────────────────────────
 // Token stored as httpOnly cookie (server-set) AND cached in sessionStorage for
@@ -165,6 +165,28 @@ export const api = {
   /** Bỏ đánh dấu "Xong" — annotator chỉ bỏ của mình; reviewer/admin bỏ bất kỳ. */
   unmarkImageDone: (projectId: string, imageId: string) =>
     request<ImageItem>(`/api/projects/${projectId}/images/${imageId}/mark-done`, { method: 'DELETE' }),
+
+  // ── Prefill bbox (STEP-4.2) ─────────────────────────────────────────────────
+  /**
+   * Lấy gợi ý bbox cho ảnh chưa có annotation.
+   * Trả { suggestions: [] } nếu ảnh đã có annotation hoặc cache miss (legacy mode).
+   * Throws nếu 422 (NO_DEFAULT_MODEL) hoặc 503 (inference không sẵn sàng).
+   * @param conf threshold lọc box (0-1), mặc định 0.4 ở server
+   */
+  getPrefill: (projectId: string, imageId: string, conf?: number) =>
+    request<{ suggestions: SuggestedBox[] }>(
+      `/api/projects/${projectId}/images/${imageId}/prefill${conf !== undefined ? `?conf=${conf}` : ''}`,
+    ),
+
+  /**
+   * Đặt model mặc định cho project (dùng khi prefill tự động khi mở ảnh).
+   * @param modelId null để bỏ model mặc định
+   */
+  setDefaultModel: (projectId: string, modelId: string | null) =>
+    request<Project>(`/api/projects/${projectId}/default-model`, {
+      method: 'PATCH',
+      body: JSON.stringify({ model_id: modelId }),
+    }),
 
   // ── Review workflow (STEP-2.3) ───────────────────────────────────────────────
   submitReview: (imageId: string) =>

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, getCurrentUser } from '../api';
-import type { ClassLabel, ImageItem, Project, Split } from '../types';
+import type { ClassLabel, ImageItem, ModelInfo, Project, Split } from '../types';
 import { getFilesFromDataTransfer, isImageFile, isZipFile } from '../utils/files';
 import StatsPanel from '../components/StatsPanel';
 import ExportModal from '../components/ExportModal';
@@ -24,6 +24,8 @@ export default function ProjectDetailPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [classes, setClasses] = useState<ClassLabel[]>([]);
   const [images, setImages] = useState<ImageItem[]>([]);
+  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [settingDefault, setSettingDefault] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -51,6 +53,7 @@ export default function ProjectDetailPage() {
     api.getProject(projectId).then(setProject);
     api.listClasses(projectId).then(setClasses);
     api.listImages(projectId).then(setImages);
+    api.listModels(projectId).then(setModels); // STEP-4.2: cần để hiển thị model mặc định
   }, [projectId]);
 
   useEffect(() => { load(); }, [load]);
@@ -232,6 +235,68 @@ export default function ProjectDetailPage() {
               <span>Đã gán nhãn: <b>{labeledCount}</b></span>
               <span>Chưa gán: <b>{images.length - labeledCount}</b></span>
             </div>
+          </div>
+
+          {/* STEP-4.2: Model mặc định cho prefill tự động */}
+          <div>
+            <h4>Model mặc định (Prefill)</h4>
+            {models.length === 0 ? (
+              <p style={{ fontSize: 12, color: '#888', margin: '4px 0 0' }}>
+                Chưa có model nào. Upload model .pt qua nút "Auto Label".
+              </p>
+            ) : (
+              <div>
+                {models.map((m) => (
+                  <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                    <span style={{ fontSize: 12, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                      title={m.original_name}>{m.original_name}</span>
+                    {project?.default_model_id === m.id ? (
+                      <span style={{ fontSize: 11, color: '#2e7d32', fontWeight: 600, whiteSpace: 'nowrap' }}>★ Mặc định</span>
+                    ) : canReview ? (
+                      <button
+                        className="btn btn-outline"
+                        style={{ fontSize: 11, padding: '1px 6px', whiteSpace: 'nowrap' }}
+                        disabled={settingDefault}
+                        onClick={async () => {
+                          if (!projectId) return;
+                          setSettingDefault(true);
+                          try {
+                            const updated = await api.setDefaultModel(projectId, m.id);
+                            setProject(updated);
+                            showToast(`Đã đặt "${m.original_name}" làm model mặc định`);
+                          } catch { showToast('Lỗi khi đặt model mặc định', true); }
+                          finally { setSettingDefault(false); }
+                        }}
+                      >
+                        Đặt mặc định
+                      </button>
+                    ) : null}
+                  </div>
+                ))}
+                {project?.default_model_id && canReview && (
+                  <button
+                    className="btn btn-outline"
+                    style={{ fontSize: 11, marginTop: 2 }}
+                    disabled={settingDefault}
+                    onClick={async () => {
+                      if (!projectId) return;
+                      setSettingDefault(true);
+                      try {
+                        const updated = await api.setDefaultModel(projectId, null);
+                        setProject(updated);
+                        showToast('Đã bỏ model mặc định');
+                      } catch { showToast('Lỗi', true); }
+                      finally { setSettingDefault(false); }
+                    }}
+                  >
+                    Bỏ mặc định
+                  </button>
+                )}
+                <p style={{ fontSize: 11.5, color: '#888', marginTop: 4 }}>
+                  Model mặc định được dùng để gợi ý bbox tự động khi mở ảnh chưa có annotation.
+                </p>
+              </div>
+            )}
           </div>
         </div>
 

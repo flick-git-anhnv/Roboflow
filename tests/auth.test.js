@@ -21,6 +21,8 @@
  *  Row 15: PATCH self (display_name) → all roles 200 (self); annotator change role → 403
  *  Row 16: Change role/is_active of other → annotator 403, reviewer 403, admin 200
  *  Row 20: detect_cache endpoints (STEP-4.1) → unauthenticated 401, authenticated 200
+ *  Row 21: prefill bbox (STEP-4.2) → unauthenticated 401, annotator PATCH 403,
+ *          no default model 422, image-with-annotations → 200 {suggestions:[]}
  *
  * Security warning tests (ADR §6.3):
  *  W1: Same error message for wrong username vs wrong password
@@ -767,6 +769,121 @@ async function runTests() {
     });
     ok('Row20: DELETE /cache bad project → 404', cacheDelBadProj.status === 404,
       `got ${cacheDelBadProj.status}`);
+  }
+
+  // ── Row 21: prefill bbox (STEP-4.2) ──────────────────────────────────────
+  // Server runs USE_LEGACY_INFER=1 → cache miss returns 503 (inference unavailable).
+  // Tests cover: auth gate (401), permission (403 annotator PATCH), no-default-model (422),
+  // image-with-annotations → 200 empty suggestions, invalid model_id → 400.
+  console.log('\n── Row 21: prefill bbox (STEP-4.2) ──');
+  {
+    // Upload fresh image for Row 21 (các ảnh từ setup đã bị xoá trong Row 4)
+    const row21UploadRes = await uploadImage(PID, annotatorToken);
+    ok('Row21 setup: upload fresh image → 201', row21UploadRes.status === 201,
+      `got ${row21UploadRes.status}`);
+    const row21Images = await row21UploadRes.json();
+    const imgIdForPrefill = row21Images[0]?.id;
+
+    // 1. GET /prefill unauthenticated → 401
+    const prefillUnauth = await fetch(
+      `${BASE}/api/projects/${PID}/images/${imgIdForPrefill}/prefill`,
+    );
+    ok('Row21: GET /prefill unauthenticated → 401', prefillUnauth.status === 401,
+      `got ${prefillUnauth.status}`);
+
+    // 2. PATCH /default-model unauthenticated → 401
+    const patchDefaultUnauth = await fetch(
+      `${BASE}/api/projects/${PID}/default-model`,
+      { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model_id: 'x' }) },
+    );
+    ok('Row21: PATCH /default-model unauthenticated → 401', patchDefaultUnauth.status === 401,
+      `got ${patchDefaultUnauth.status}`);
+
+    // 3. PATCH /default-model annotator → 403 (annotator không được phép)
+    const patchDefaultAnnotator = await patch(
+      `/api/projects/${PID}/default-model`,
+      { model_id: 'nonexistent' },
+      annotatorToken,
+    );
+    ok('Row21: PATCH /default-model annotator → 403', patchDefaultAnnotator.status === 403,
+      `got ${patchDefaultAnnotator.status}`);
+
+    // 4. GET /prefill no default_model_id → 422 NO_DEFAULT_MODEL
+    // (project vừa tạo chưa có default_model_id)
+    const prefillNoModel = await get(
+      `/api/projects/${PID}/images/${imgIdForPrefill}/prefill`,
+      annotatorToken,
+    );
+    ok('Row21: GET /prefill no default model → 422', prefillNoModel.status === 422,
+      `got ${prefillNoModel.status}`);
+    const prefillNoModelData = await prefillNoModel.json();
+    ok('Row21: error = NO_DEFAULT_MODEL', prefillNoModelData.error === 'NO_DEFAULT_MODEL',
+      `error=${prefillNoModelData.error}`);
+
+    // 5. PATCH /default-model invalid model_id → 400 (model không tồn tại)
+    const patchBadModel = await patch(
+      `/api/projects/${PID}/default-model`,
+      { model_id: 'nonexistent-model-id' },
+      adminToken,
+    );
+    ok('Row21: PATCH /default-model invalid model_id → 400', patchBadModel.status === 400,
+      `got ${patchBadModel.status}`);
+
+    // 6. Tạo image khác, save annotations vào → GET /prefill → 200 { suggestions: [] }
+    // (ảnh đã có annotation → server trả rỗng, không cần gọi inference)
+    const uploadForPrefill = await uploadImage(PID, adminToken);
+    ok('Row21: upload image for prefill annotation test → 201', uploadForPrefill.status === 201,
+      `got ${uploadForPrefill.status}`);
+    const uploadedPrefillImages = await uploadForPrefill.json();
+    const imgWithAnnotations = uploadedPrefillImages[0].id;
+
+    // Lấy class ID để save annotation
+    const classesRes = await get(`/api/projects/${PID}/classes`, adminToken);
+    const classesData = await classesRes.json();
+    const firstClassId = classesData[0]?.id;
+
+    if (firstClassId && imgWithAnnotations) {
+      // Save một annotation vào ảnh
+      const saveAnnotRes = await put(
+        `/api/images/${imgWithAnnotations}/annotations`,
+        { annotations: [{ class_id: firstClassId, x: 10, y: 10, w: 50, h: 50, type: 'bbox', points: null }] },
+        adminToken,
+      );
+      ok('Row21: save annotation to image → 200', saveAnnotRes.status === 200,
+        `got ${saveAnnotRes.status}`);
+
+      // GET /prefill ảnh đã có annotation → 200 với suggestions = []
+      const prefillWithAnnot = await get(
+        `/api/projects/${PID}/images/${imgWithAnnotations}/prefill`,
+        adminToken,
+      );
+      ok('Row21: GET /prefill image-with-annotations → 200', prefillWithAnnot.status === 200,
+        `got ${prefillWithAnnot.status}`);
+      const prefillWithAnnotData = await prefillWithAnnot.json();
+      ok('Row21: suggestions rỗng khi ảnh đã có annotation',
+        Array.isArray(prefillWithAnnotData.suggestions) && prefillWithAnnotData.suggestions.length === 0,
+        `suggestions.length=${prefillWithAnnotData.suggestions?.length}`);
+
+      // Reviewer cũng GET được
+      const prefillReviewer = await get(
+        `/api/projects/${PID}/images/${imgWithAnnotations}/prefill`,
+        reviewerToken,
+      );
+      ok('Row21: GET /prefill reviewer → 200', prefillReviewer.status === 200,
+        `got ${prefillReviewer.status}`);
+
+      // Annotator cũng GET được (không phân biệt role)
+      const prefillAnnotator = await get(
+        `/api/projects/${PID}/images/${imgIdForPrefill}/prefill`,
+        annotatorToken,
+      );
+      ok('Row21: GET /prefill annotator (no model) → 422', prefillAnnotator.status === 422,
+        `got ${prefillAnnotator.status} (422=no default model, access OK)`);
+    } else {
+      skip('Row21: annotation-based prefill tests', 'Không có class hoặc image');
+      skip('Row21: reviewer prefill test', 'Không có class hoặc image');
+      skip('Row21: annotator prefill test', 'Không có class hoặc image');
+    }
   }
 
   // ── Rate limit test ───────────────────────────────────────────────────────

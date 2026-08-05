@@ -162,8 +162,9 @@ Roboflow - Copy/
 | **[STEP-1.3]** Thumbnails router | import + mount `routes/thumbnails.js` tại `/api/images` | CONFIRMED |
 | **[STEP-3.2]** History router | import + mount `routes/history.js` tại `/api/images/:imageId` | CONFIRMED |
 | **[STEP-3.3]** Activity router | import + mount `routes/activity.js` tại `/api/projects/:projectId/activity` | CONFIRMED |
+| **[STEP-4.2]** Prefill router | import + mount `routes/prefill.js` tại `/api/projects/:projectId` | CONFIRMED |
 | Env vars đọc | `PORT`, `PYTHON_BIN`, `INFERENCE_PORT`, `USE_LEGACY_INFER` | CONFIRMED |
-| Last verified | 2026-08-05 (STEP-3.3) | - |
+| Last verified | 2026-08-05 (STEP-4.2) | - |
 
 **Route mounting:**
 ```
@@ -180,6 +181,7 @@ Roboflow - Copy/
 /api/images/:imageId                  → routes/reviews.js     [STEP-2.3 MỚI]
 /api/images/:imageId                  → routes/history.js     [STEP-3.2 MỚI]
 /api/projects/:projectId/activity     → routes/activity.js    [STEP-3.3 MỚI]
+/api/projects/:projectId              → routes/prefill.js     [STEP-4.2 MỚI]
 ```
 
 ---
@@ -196,7 +198,8 @@ Roboflow - Copy/
 | Migrations inline | `PRAGMA table_info` + `ALTER TABLE` cho cột thiếu | CONFIRMED |
 | **[STEP-1.2]** Startup cleanup | `UPDATE jobs SET status='error' WHERE status IN ('running','pending')` — mọi job dở dang khi restart đều bị đánh dấu error | CONFIRMED |
 | **[STEP-4.1]** `m007_detect_cache()` | CREATE TABLE `detect_cache` + unique index `(image_id, model_id)` + 2 indexes; verify row count trước/sau | CONFIRMED |
-| Last verified | 2026-08-05 (STEP-4.1) | - |
+| **[STEP-4.2]** `m008_default_model_id()` | ALTER TABLE projects ADD COLUMN `default_model_id TEXT`; verify row count projects trước/sau | CONFIRMED |
+| Last verified | 2026-08-05 (STEP-4.2) | - |
 
 **Inline migrations hiện có (chạy khi server khởi động):**
 1. `annotations.type` — nếu chưa có → ADD COLUMN type TEXT DEFAULT 'bbox'
@@ -208,6 +211,7 @@ Roboflow - Copy/
 7. **[STEP-3.1]** `m005_phase3_schema()` — ADD COLUMN annotations.version + CREATE TABLE annotation_history + activity_log; backup + verify row count
 8. **[STEP-3.5]** `m006_add_image_done_columns()` — ALTER TABLE images (completed_at + completed_by) + index; verify row count
 9. **[STEP-4.1]** `m007_detect_cache()` — CREATE TABLE detect_cache + 3 indexes; verify row count
+10. **[STEP-4.2]** `m008_default_model_id()` — ALTER TABLE projects ADD COLUMN default_model_id TEXT; verify row count
 
 ---
 
@@ -470,6 +474,38 @@ Lifecycle: `draft → in_review → approved` hoặc `→ rejected → (submit l
 
 ---
 
+### 3.16 `server/src/routes/prefill.js` — Prefill bbox tự động (STEP-4.2 MỚI)
+
+| Thuộc tính | Giá trị | Confidence |
+|---|---|---|
+| Router options | Router({ mergeParams: true }) | CONFIRMED |
+| Imports | db, fetch (node-fetch), requireRole (middleware/roles.js) | CONFIRMED |
+| Callers/Used-by | index.js (mounted `/api/projects/:projectId`) | CONFIRMED |
+| Last verified | 2026-08-05 (STEP-4.2) | - |
+
+| Method | Path | Role required | Mô tả |
+|---|---|---|---|
+| GET | `/images/:imageId/prefill` | authenticated | Trả gợi ý bbox; 200+[] nếu đã có annotation; 422 nếu chưa có model mặc định; cache hit/miss inference |
+| PATCH | `/default-model` | reviewer, admin | Đặt/bỏ model mặc định cho project (`{ model_id: string\|null }`) |
+
+**Constants:** `INFERENCE_PORT=8765`, `CACHE_RAW_CONF=0.01`, `PREFILL_DEFAULT_CONF=0.4`, `USE_LEGACY_INFER`
+
+**Helpers inlined (copy từ autolabel.js — không import):**
+- `getCachedDetections(imageId, modelId)` — query bảng `detect_cache`
+- `saveToCacheDetections(imageId, modelId, boxes)` — insert với `raw_boxes JSON`, `conf=CACHE_RAW_CONF`
+- `filterRawBoxesByConf(boxes, conf)` — filter array theo threshold
+- `buildSuggestions(projectId, classes, boxes, conf)` — map class_name → class_id từ DB, trả `SuggestedBox[]`
+- `checkInferenceHealth()` — 3s timeout GET `http://localhost:${INFERENCE_PORT}/health`
+
+**Error codes trả về:**
+- `422 NO_DEFAULT_MODEL` — project chưa có `default_model_id`
+- `422 DEFAULT_MODEL_NOT_FOUND` — model_id đã lưu không còn trong DB
+- `400 INVALID_MODEL_ID` — PATCH body thiếu/sai kiểu
+- `503 INFERENCE_NOT_READY` — service inference không phản hồi (cache miss, non-legacy mode)
+- `503 INFERENCE_UNAVAILABLE_LEGACY` — legacy mode, không gọi inference được
+
+---
+
 ## 4. Module map — Client
 
 ### 4.1 `client/src/App.tsx` — Router root
@@ -489,7 +525,7 @@ Lifecycle: `draft → in_review → approved` hoặc `→ rejected → (submit l
 | Pattern | Thin fetch wrapper (`request<T>`) — không có state | CONFIRMED |
 | Callers/Used-by | ProjectsPage, ProjectDetailPage, AnnotatorPage | CONFIRMED |
 | Auth | JWT Bearer + httpOnly cookie (STEP-2.2) | CONFIRMED |
-| Last verified | 2026-08-05 (STEP-3.4) | - |
+| Last verified | 2026-08-05 (STEP-4.2) | - |
 
 **Hàm public:**
 ```
@@ -503,21 +539,27 @@ exportUrl, getSplitPreview
 getStats
 listModels, uploadModel, deleteModel
 startAutoLabel, getAutoLabelJob
+markImageDone, unmarkImageDone
 submitReview, approveReview, rejectReview
+getPrefill(projectId, imageId, conf?)   ← [STEP-4.2] MỚI — trả { suggestions: SuggestedBox[] }
+setDefaultModel(projectId, modelId)     ← [STEP-4.2] MỚI — PATCH default-model, modelId=null để bỏ
 ```
+
+> **[STEP-4.2]** `getPrefill` silently ignores 422 (no model) ở AnnotatorPage — prefill là tính năng nền, không block UX. `setDefaultModel` dùng trong ProjectDetailPage bởi reviewer/admin.
 
 ---
 
 ### 4.3 `client/src/types.ts` — TypeScript types
 
 Các interface chính:
-- `Project` — id, name, description, created_at, image_count, labeled_count, class_count
+- `Project` — id, name, description, created_at, image_count, labeled_count, class_count, **default_model_id?: string | null** (STEP-4.2)
 - `ClassLabel` — id, project_id, name, color, sort_order, hotkey
 - `ImageItem` — id, project_id, filename, original_name, width, height, split, status, created_at, class_ids[], thumbnail_url? (STEP-1.3), review_status?, review_comment?, reviewed_by?, reviewed_at? (STEP-2.3)
 - `Annotation` — id, image_id, class_id, x, y, w, h, type, points
 - `ImageWithAnnotations` — ImageItem + annotations[] + **annotationVersion: number** (STEP-3.4 — version dùng cho optimistic locking)
 - `ModelInfo` — id, project_id, filename, original_name, created_at
 - `AutoLabelJob` — status, total, done, created, failed, error, unmatchedClasses[]
+- **`SuggestedBox`** (STEP-4.2 MỚI) — class_id, x, y, w, h, type:'bbox'|'quad', conf, points?
 
 ---
 
@@ -534,16 +576,19 @@ Các interface chính:
 | State: undo | KHÔNG có undo/redo hiện tại | CONFIRMED |
 | **[STEP-3.4] annotationVersionRef** | `useRef<number>(0)` — lưu version annotation hiện tại (từ `img.annotationVersion` khi load). Dùng làm `expectedVersion` khi gọi `saveAnnotations()`. Cập nhật thành `result.annotationVersion` sau mỗi save thành công. | CONFIRMED |
 | **[STEP-3.4] 409 handling** | `scheduleSave` catch `Error('ANNOTATION_CONFLICT')` → alert + reload image + cập nhật `annotationVersionRef`. Lỗi khác → trạng thái `dirty` để user retry. | CONFIRMED |
-| Last verified | 2026-08-05 (STEP-3.4) | - |
+| **[STEP-4.2] Prefill** | Khi load ảnh xong: nếu `imgBoxes.length === 0` → gọi `api.getPrefill()` background. Trả `SuggestedBox[]` → map qua `suggestionToBox()` → `setBoxes()` (KHÔNG gọi `scheduleSave`). State `prefillLoading` + `prefillCount` hiển thị banner. User action đầu tiên (`updateBoxes`) reset `prefillCount → 0`. | CONFIRMED |
+| **[STEP-4.2] cancelled flag** | `useEffect` dùng `let cancelled = false` → cleanup `cancelled = true` khi unmount/imageId change — tránh setState trên unmounted component. | CONFIRMED |
+| Last verified | 2026-08-05 (STEP-4.2) | - |
 
 ---
 
 ### 4.5 `client/src/pages/ProjectDetailPage.tsx` — Image grid
 
-| API calls | listClasses, listImages, uploadImages, uploadZip, updateImage, deleteImage |
+| API calls | listClasses, listImages, uploadImages, uploadZip, updateImage, deleteImage, **listModels** [STEP-4.2], **setDefaultModel** [STEP-4.2] |
 |---|---|
 | Features | Filter by status/split/class/search, pagination (page×pageSize), drag-drop upload |
 | Modals | StatsPanel, ExportModal, AutoLabelModal |
+| **[STEP-4.2] Default model UI** | Section "Model mặc định (Prefill)" trong side panel: list models, nút "Đặt mặc định" / badge "★ Mặc định" / nút "Bỏ mặc định". Chỉ reviewer/admin mới thấy (role check). |
 
 ---
 
@@ -634,6 +679,9 @@ Các interface chính:
 | name | TEXT | NOT NULL |
 | description | TEXT | DEFAULT '' |
 | created_at | TEXT | NOT NULL DEFAULT datetime('now') |
+| **default_model_id** | TEXT | nullable, soft-ref→models(id) — **[STEP-4.2]** model mặc định cho prefill tự động |
+
+> **[STEP-4.2]** `default_model_id` là soft reference (không dùng FK constraint trong SQLite ALTER TABLE). Application layer (`prefill.js`) tự validate model còn tồn tại. Khi model bị xoá: không có CASCADE tự động → `prefill.js` trả 422 `DEFAULT_MODEL_NOT_FOUND`, reviewer/admin cần chọn lại model mặc định.
 
 ### Bảng `classes`
 

@@ -453,6 +453,45 @@ function m007_detect_cache() {
 
 m007_detect_cache();
 
+// ─── m008_default_model_id ─────────────────────────────────────────────────────
+// STEP-4.2: Prefill bbox tự động — thêm cột default_model_id vào bảng projects.
+//   Khi user mở ảnh chưa có annotation, client gọi GET /prefill → server dùng
+//   model mặc định của project để trả gợi ý bbox từ detect_cache hoặc inference.
+//
+//   default_model_id NULL  → project chưa cấu hình model mặc định, prefill trả 422.
+//   ON DELETE SET NULL     → xoá model không break project, chỉ disable prefill.
+//
+// Idempotent: kiểm tra PRAGMA table_info(projects) trước ALTER TABLE.
+// Verify: row count projects trước/sau (CTO condition #1 pattern, dù ADD COLUMN
+//   không có risk mất dữ liệu existing — giữ pattern nhất quán với m005-m007).
+function m008_default_model_id() {
+  const projCols = db.prepare('PRAGMA table_info(projects)').all().map((c) => c.name);
+  if (projCols.includes('default_model_id')) return; // already migrated
+
+  const before = db.prepare('SELECT COUNT(*) AS n FROM projects').get().n;
+  console.log(`[INFO] m008: projects row count BEFORE migration: ${before}`);
+
+  // ON DELETE SET NULL: FK constraint — xoá model → default_model_id tự về NULL
+  // SQLite ALTER TABLE không hỗ trợ foreign key inline nhưng foreign_keys=ON
+  // sẽ enforce ở runtime cho INSERT/UPDATE. SET NULL khi DELETE hoạt động qua trigger.
+  // Đơn giản hóa: chỉ add column TEXT, không add FK constraint (SQLite không hỗ trợ
+  // ADD CONSTRAINT qua ALTER TABLE) — referential integrity enforce ở application layer.
+  db.exec('ALTER TABLE projects ADD COLUMN default_model_id TEXT');
+
+  const after = db.prepare('SELECT COUNT(*) AS n FROM projects').get().n;
+  console.log(`[INFO] m008: projects row count AFTER  migration: ${after}`);
+
+  if (after < before) {
+    const msg = `[CRITICAL] DATA LOSS in projects: ${before} rows → ${after} rows. Migration: m008_default_model_id`;
+    console.error(msg);
+    throw new Error(msg);
+  }
+
+  console.log('[INFO] m008: default_model_id column added to projects ✓');
+}
+
+m008_default_model_id();
+
 // ─── Retention helper: annotation_history ─────────────────────────────────────
 // Gọi bởi STEP-3.2 (routes/history.js) ngay sau mỗi INSERT INTO annotation_history.
 // Giữ tối đa 200 version gần nhất mỗi ảnh (ADR AD-5 retention policy).

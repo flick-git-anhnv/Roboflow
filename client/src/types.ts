@@ -19,6 +19,8 @@ export interface Project {
   image_count: number;
   labeled_count: number;
   class_count: number;
+  /** STEP-4.2: model mặc định cho prefill tự động khi mở ảnh chưa có annotation. */
+  default_model_id?: string | null;
 }
 
 export interface ClassLabel {
@@ -86,6 +88,18 @@ export interface ModelInfo {
   filename: string;
   original_name: string;
   created_at: string;
+}
+
+/** STEP-4.2: Gợi ý bbox từ endpoint /prefill (server đã map class_id, đã filter conf). */
+export interface SuggestedBox {
+  class_id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  type: 'bbox' | 'quad';
+  conf: number;
+  points?: [Point, Point, Point, Point] | null;
 }
 
 export type AutoLabelJobStatus = 'running' | 'done' | 'error';

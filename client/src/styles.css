@@ -315,8 +315,11 @@ a { color: inherit; text-decoration: none; }
 }
 .class-row:hover { background: var(--bg); }
 .class-swatch { width: 14px; height: 14px; border-radius: 4px; flex-shrink: 0; }
-.class-row input[type=text] { flex: 1; border: none; background: transparent; font-size: 13px; padding: 2px; }
-.class-row input[type=color] { width: 22px; height: 22px; padding: 0; border: none; background: none; }
+/* BUGFIX: input mặc định có min-width:auto (~170-190px), KHÔNG co dù flex:1 —
+   ép cả dòng .class-row tràn ra ngoài sidebar hẹp, đẩy nút xoá (✕) ra khỏi vùng
+   nhìn thấy và bóp méo ô chọn màu (22px → 6px). Bắt buộc min-width:0. */
+.class-row input[type=text] { flex: 1; min-width: 0; border: none; background: transparent; font-size: 13px; padding: 2px; }
+.class-row input[type=color] { width: 22px; min-width: 22px; height: 22px; padding: 0; border: none; background: none; flex-shrink: 0; }
 .hotkey-input {
   width: 26px !important;
   flex: none !important;
@@ -330,7 +333,7 @@ a { color: inherit; text-decoration: none; }
   padding: 3px !important;
 }
 .hotkey-input:focus { border-color: var(--orange) !important; outline: none; }
-.class-row button { border: none; background: none; color: #999; cursor: pointer; font-size: 13px; }
+.class-row button { border: none; background: none; color: #999; cursor: pointer; font-size: 13px; flex-shrink: 0; padding: 2px 4px; }
 .class-row button:hover { color: var(--danger); }
 
 .dropzone {

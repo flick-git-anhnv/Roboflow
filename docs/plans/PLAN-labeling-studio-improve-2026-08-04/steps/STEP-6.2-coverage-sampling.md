@@ -2,8 +2,8 @@
 step: "6.2"
 plan: ../PLAN-MASTER.md
 agent: senior-developer
-status: todo
-completed_at:
+status: skipped
+completed_at: "2026-08-05 11:56"
 deps: ["0.2"]
 ---
 
@@ -31,26 +31,26 @@ Khi import nhiều ảnh vào project, cho phép user chọn sampling strategy �
 
 ## Đã làm
 
-[Điền SAU khi hoàn thành]
+Đã hỏi user làm rõ scope (theo đúng yêu cầu DoD) với 3 phương án: (a) sample subset khi upload folder/zip lớn, (b) chỉ gợi ý UI không tự lọc, (c) bỏ qua bước này vì không phù hợp kiến trúc hiện tại. **User chọn phương án (c) — bỏ qua.**
 
 ## Artifact
 
-[Điền SAU khi hoàn thành]
+Không có (bước bị skip trước khi code).
 
 ## Quyết định quan trọng
 
-[Điền SAU khi hoàn thành]
+**Bỏ qua bước 6.2 theo quyết định của user.** Lý do nêu ra khi hỏi: bản server hiện tại (KZTEK Labeling Studio) chỉ có upload file/folder/zip từ trình duyệt — hoàn toàn KHÔNG có tích hợp thu thập ảnh tự động từ camera/API như tool cũ (D:\Tool có 3 worker riêng: LotteImage, Parkingv8, Parkingv6, dùng thuật toán "Time-Rotating Sampling"). Áp dụng coverage sampling cho luồng upload thủ công hiện tại không mang lại giá trị tương đương — user quyết định không cần tính năng này ở đợt cải tiến này.
 
 ## Handoff Payload — bước sau đọc phần này
 
-- do_not_redo: Không có
-- watch_out: Không có
-- next_inputs: Không có
+- do_not_redo: Không cần implement `POST /api/projects/:id/import-sampled` hay bất kỳ UI sampling nào — bước này đã bị skip có chủ đích, không phải bỏ sót.
+- watch_out: Nếu sau này project có tính năng thu thập ảnh tự động từ camera/API (ngoài scope hiện tại), có thể mở lại ý tưởng "Time-Rotating Sampling" từ tool cũ (`D:\Tool\tool\features\collection\event_planner.py`).
+- next_inputs: Không có — bước 6.3 (duplicate/validate dataset) độc lập, không phụ thuộc bước này.
 
 ## Commit
 
-- Hash: [điền sau khi commit]
-- Đã push: [có/không]
+- Hash: Không có (không code, chỉ cập nhật plan — sẽ commit cùng lúc với việc cập nhật PLAN-MASTER)
+- Đã push: sẽ push cùng lần commit tiếp theo
 
 ---
 **Status icons:** ⬜ Todo | 🔄 In Progress | ✅ Done | 🛑 Blocked | ⏭️ Skipped

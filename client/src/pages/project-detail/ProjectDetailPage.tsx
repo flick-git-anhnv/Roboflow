@@ -36,6 +36,20 @@ export default function ProjectDetailPage() {
   const [autoLabelOpen, setAutoLabelOpen] = useState(false);
   const [validateOpen, setValidateOpen] = useState(false);
   const [assignmentOpen, setAssignmentOpen] = useState(false);
+  const [gridSize, setGridSize] = useState<'small' | 'medium' | 'large'>(() => {
+    try {
+      const saved = localStorage.getItem('project_grid_size');
+      if (saved === 'small' || saved === 'medium' || saved === 'large') return saved;
+    } catch {}
+    return 'medium';
+  });
+
+  const handleGridSizeChange = (size: 'small' | 'medium' | 'large') => {
+    setGridSize(size);
+    try {
+      localStorage.setItem('project_grid_size', size);
+    } catch {}
+  };
 
   const currentUser = getCurrentUser();
   const canReview = currentUser?.role === 'reviewer' || currentUser?.role === 'admin';
@@ -118,7 +132,7 @@ export default function ProjectDetailPage() {
 
   if (!project) return <p>Đang tải...</p>;
 
-  const labeledCount = images.filter((i) => i.status === 'labeled').length;
+  const labeledCount = images.filter((i) => i.status === 'labeled' || i.completed_at).length;
 
   return (
     <div>
@@ -182,6 +196,7 @@ export default function ProjectDetailPage() {
             reviewFilter={reviewFilter}
             doneFilter={doneFilter}
             pageSize={pageSize}
+            gridSize={gridSize}
             classes={classes}
             canReview={canReview}
             hasActiveFilters={hasActiveFilters}
@@ -196,6 +211,7 @@ export default function ProjectDetailPage() {
             onReviewFilterChange={setReviewFilter}
             onDoneFilterChange={setDoneFilter}
             onPageSizeChange={setPageSize}
+            onGridSizeChange={handleGridSizeChange}
             onResetFilters={resetFilters}
           />
 
@@ -218,6 +234,7 @@ export default function ProjectDetailPage() {
             onToggleSelect={toggleSelect}
             onChangeSplit={changeSplit}
             onRemoveImage={removeImage}
+            gridSize={gridSize}
           />
 
           {filteredImages.length > 0 && (
@@ -229,7 +246,7 @@ export default function ProjectDetailPage() {
       {statsOpen && project && <StatsPanel projectId={project.id} onClose={() => setStatsOpen(false)} />}
       {exportOpen && project && <ExportModal projectId={project.id} onClose={() => setExportOpen(false)} />}
       {validateOpen && project && <ValidateModal projectId={project.id} onClose={() => setValidateOpen(false)} />}
-      {assignmentOpen && project && <AssignmentModal projectId={project.id} onClose={() => setAssignmentOpen(false)} />}
+      {assignmentOpen && project && <AssignmentModal projectId={project.id} onClose={() => { setAssignmentOpen(false); load(); }} />}
       {autoLabelOpen && project && (
         <AutoLabelModal
           projectId={project.id}

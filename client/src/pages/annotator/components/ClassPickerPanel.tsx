@@ -38,15 +38,12 @@ export const ClassPickerPanel: React.FC<ClassPickerPanelProps> = ({
             const highlighted = selectedId
               ? boxes.find((b) => b.id === selectedId)?.class_id === c.id
               : activeClassId === c.id;
-            const mruIdx = mruClassIds.indexOf(c.id);
-            const mruKey = mruIdx >= 0 && mruIdx < 9 ? String(mruIdx + 1) : null;
             return (
               <div key={c.id} className={`class-picker-row ${highlighted ? 'active' : ''}`}
                 onClick={() => onAssignClassToSelected(c.id)}>
                 <span className="swatch" style={{ background: c.color }} />
                 <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
                 <span style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
-                  {mruKey && <span className="key">{mruKey}</span>}
                   {c.hotkey && <span className="key custom">{c.hotkey}</span>}
                 </span>
               </div>

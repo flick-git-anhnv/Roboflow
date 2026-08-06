@@ -9,7 +9,7 @@ router.get('/', (req, res) => {
   if (!project) return res.status(404).json({ error: 'Không tìm thấy project' });
 
   const classes = db.prepare('SELECT * FROM classes WHERE project_id = ? ORDER BY sort_order ASC').all(projectId);
-  const images = db.prepare('SELECT id, split, status FROM images WHERE project_id = ?').all(projectId);
+  const images = db.prepare('SELECT id, split, status, completed_at FROM images WHERE project_id = ?').all(projectId);
 
   const countByClass = db.prepare(`
     SELECT a.class_id AS class_id, COUNT(*) AS count
@@ -28,7 +28,7 @@ router.get('/', (req, res) => {
   }));
 
   const totalAnnotations = perClass.reduce((sum, c) => sum + c.count, 0);
-  const labeledImages = images.filter((i) => i.status === 'labeled').length;
+  const labeledImages = images.filter((i) => i.status === 'labeled' || i.completed_at).length;
   const bySplit = { train: 0, valid: 0, test: 0 };
   for (const img of images) {
     const s = ['train', 'valid', 'test'].includes(img.split) ? img.split : 'train';

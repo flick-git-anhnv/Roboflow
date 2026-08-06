@@ -14,7 +14,7 @@ function normalizeHotkey(hotkey) {
   if (typeof hotkey !== 'string') return null;
   const trimmed = hotkey.trim().slice(0, 2);
   if (!trimmed) return null;
-  if (/^[0-9]+$/.test(trimmed)) return null;
+  if (!/^[a-zA-Z0-9]+$/.test(trimmed)) return null;
   return trimmed;
 }
 

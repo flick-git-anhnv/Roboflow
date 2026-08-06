@@ -260,6 +260,7 @@ export default function AnnotatorPage() {
       id: `copy_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     }));
     const merged = [...boxesRef.current.filter((b) => b.id !== DRAWING_ID), ...copiedBoxes];
+    pushHistorySnapshot();
     setBoxes(merged);
     scheduleSave(merged);
   }, [currentIndex, images, projectId, boxesRef, pushHistorySnapshot, setPrefillCount, setBoxes, scheduleSave, setCopyingLabels]);
@@ -628,7 +629,7 @@ export default function AnnotatorPage() {
       });
 
       if (willFinalize && preDragSnapshotRef.current) {
-        pushHistorySnapshot();
+        pushHistorySnapshot(preDragSnapshotRef.current);
       }
       preDragSnapshotRef.current = null;
       lastDrawnSizeRef.current = null;
@@ -636,7 +637,7 @@ export default function AnnotatorPage() {
       const changed = preDragSnapshotRef.current
         && JSON.stringify(preDragSnapshotRef.current) !== JSON.stringify(boxesRef.current);
       if (changed && preDragSnapshotRef.current) {
-        pushHistorySnapshot();
+        pushHistorySnapshot(preDragSnapshotRef.current);
       }
       preDragSnapshotRef.current = null;
       if (changed) setBoxes((prev) => { scheduleSave(prev); return prev; });

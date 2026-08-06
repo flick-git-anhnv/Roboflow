@@ -70,7 +70,7 @@ export function useHotkeys({
         return;
       }
 
-      if (e.target instanceof HTMLInputElement) return;
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || (e.target as HTMLElement).isContentEditable) return;
 
       // Ctrl+Z / Ctrl+Y
       if (e.ctrlKey || e.metaKey) {
@@ -121,18 +121,8 @@ export function useHotkeys({
       }
 
       if (!e.ctrlKey && !e.metaKey && !e.altKey) {
-        // Phím 1-9 (MRU)
-        if (e.key >= '1' && e.key <= '9') {
-          const mruIdx = Number(e.key) - 1;
-          const classId = mruClassIds[mruIdx];
-          if (classId && classes.find((c) => c.id === classId)) {
-            onAssignClassToSelected(classId);
-          }
-          return;
-        }
-
         // Buffer 2-char hotkey (500ms debounce)
-        if (e.key.length === 1 && /[a-zA-Z]/.test(e.key)) {
+        if (e.key.length === 1 && /[a-zA-Z0-9]/.test(e.key)) {
           hotkeyBufferRef.current += e.key.toLowerCase();
           if (hotkeyBufferRef.current.length > 2) hotkeyBufferRef.current = e.key.toLowerCase();
           if (hotkeyTimerRef.current) clearTimeout(hotkeyTimerRef.current);

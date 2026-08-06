@@ -12,6 +12,7 @@ interface ImageFilterBarProps {
   reviewFilter: ReviewFilter;
   doneFilter: DoneFilter;
   pageSize: number;
+  gridSize: 'small' | 'medium' | 'large';
   classes: ClassLabel[];
   canReview: boolean;
   hasActiveFilters: boolean;
@@ -26,6 +27,7 @@ interface ImageFilterBarProps {
   onReviewFilterChange: (v: ReviewFilter) => void;
   onDoneFilterChange: (v: DoneFilter) => void;
   onPageSizeChange: (size: number) => void;
+  onGridSizeChange: (size: 'small' | 'medium' | 'large') => void;
   onResetFilters: () => void;
 }
 
@@ -39,6 +41,7 @@ export const ImageFilterBar: React.FC<ImageFilterBarProps> = ({
   reviewFilter,
   doneFilter,
   pageSize,
+  gridSize,
   classes,
   canReview,
   hasActiveFilters,
@@ -53,6 +56,7 @@ export const ImageFilterBar: React.FC<ImageFilterBarProps> = ({
   onReviewFilterChange,
   onDoneFilterChange,
   onPageSizeChange,
+  onGridSizeChange,
   onResetFilters,
 }) => {
   return (
@@ -117,6 +121,11 @@ export const ImageFilterBar: React.FC<ImageFilterBarProps> = ({
         <option value={60}>60 / trang</option>
         <option value={120}>120 / trang</option>
         <option value={240}>240 / trang</option>
+      </select>
+      <select value={gridSize} onChange={(e) => onGridSizeChange(e.target.value as 'small' | 'medium' | 'large')} title="Cỡ hiển thị lưới ảnh (sizemenu)">
+        <option value="small">Cỡ nhỏ</option>
+        <option value="medium">Cỡ vừa</option>
+        <option value="large">Cỡ lớn</option>
       </select>
       <span className="filter-count">{filteredCount} / {totalCount} ảnh</span>
     </div>

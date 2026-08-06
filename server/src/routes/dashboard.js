@@ -57,7 +57,7 @@ router.get('/:projectId/dashboard', (req, res) => {
     if (!project) return res.status(404).json({ error: 'Không tìm thấy project' });
 
     const totalImages = db.prepare('SELECT COUNT(*) AS n FROM images WHERE project_id = ?').get(projectId).n;
-    const labeledImages = db.prepare("SELECT COUNT(*) AS n FROM images WHERE project_id = ? AND status = 'labeled'").get(projectId).n;
+    const labeledImages = db.prepare("SELECT COUNT(*) AS n FROM images WHERE project_id = ? AND (status = 'labeled' OR completed_at IS NOT NULL)").get(projectId).n;
     const completedImages = db.prepare('SELECT COUNT(*) AS n FROM images WHERE project_id = ? AND completed_at IS NOT NULL').get(projectId).n;
     const unlabeledImages = Math.max(0, totalImages - labeledImages);
 

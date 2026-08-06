@@ -43,7 +43,6 @@ export const QuickClassSwitcherModal: React.FC<QuickClassSwitcherModalProps> = (
         />
         <div className="class-switcher-list">
           {switcherResults.map((c, i) => {
-            const mi = mruClassIds.indexOf(c.id);
             return (
               <div
                 key={c.id}
@@ -53,7 +52,6 @@ export const QuickClassSwitcherModal: React.FC<QuickClassSwitcherModalProps> = (
               >
                 <span style={{ width: 14, height: 14, borderRadius: 3, flexShrink: 0, background: c.color, display: 'inline-block' }} />
                 <span style={{ flex: 1 }}>{c.name}</span>
-                {mi >= 0 && mi < 9 && <span className="key" style={{ fontSize: 11 }}>{mi + 1}</span>}
                 {c.hotkey && <span className="key custom" style={{ fontSize: 11 }}>{c.hotkey}</span>}
               </div>
             );

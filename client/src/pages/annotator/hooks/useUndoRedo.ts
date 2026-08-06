@@ -21,8 +21,9 @@ export function useUndoRedo(
   const [undoSize, setUndoSize] = useState(0);
   const [redoSize, setRedoSize] = useState(0);
 
-  const pushHistorySnapshot = useCallback(() => {
-    undoStackRef.current.push(boxesRef.current.map(cloneBox));
+  const pushHistorySnapshot = useCallback((customSnapshot?: Box[]) => {
+    const snap = customSnapshot || boxesRef.current;
+    undoStackRef.current.push(snap.map(cloneBox));
     if (undoStackRef.current.length > MAX_UNDO) undoStackRef.current.shift();
     redoStackRef.current = [];
     setUndoSize(undoStackRef.current.length);

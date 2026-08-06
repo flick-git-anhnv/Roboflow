@@ -11,7 +11,7 @@ router.get('/', (req, res) => {
   const projects = db.prepare(`
     SELECT p.*,
       (SELECT COUNT(*) FROM images i WHERE i.project_id = p.id) AS image_count,
-      (SELECT COUNT(*) FROM images i WHERE i.project_id = p.id AND i.status = 'labeled') AS labeled_count,
+      (SELECT COUNT(*) FROM images i WHERE i.project_id = p.id AND (i.status = 'labeled' OR i.completed_at IS NOT NULL)) AS labeled_count,
       (SELECT COUNT(*) FROM classes c WHERE c.project_id = p.id) AS class_count
     FROM projects p ORDER BY p.created_at DESC
   `).all();

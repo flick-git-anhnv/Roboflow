@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "node --watch src/index.js",
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "migrate": "node src/migrate.js",
+    "test": "node --test ../tests/*.test.js"
   },
   "dependencies": {
     "adm-zip": "^0.6.0",

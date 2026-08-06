@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { runMigrations } from './migrate.js';
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 export const UPLOAD_DIR = path.join(DATA_DIR, 'images');
@@ -580,6 +582,8 @@ function m010_work_assignment() {
 }
 
 m010_work_assignment();
+
+runMigrations(db);
 
 // ─── Retention helper: annotation_history ─────────────────────────────────────
 // Gọi bởi STEP-3.2 (routes/history.js) ngay sau mỗi INSERT INTO annotation_history.

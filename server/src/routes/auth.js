@@ -32,6 +32,7 @@ const USERNAME_RE = /^[A-Za-z0-9._-]{3,32}$/;
 
 // Delay ngẫu nhiên 150-300ms (AD-A2: chống enumeration + timing attack)
 function authDelay() {
+  if (process.env.NODE_ENV === 'test') return Promise.resolve();
   return new Promise((resolve) => setTimeout(resolve, 150 + Math.random() * 150));
 }
 

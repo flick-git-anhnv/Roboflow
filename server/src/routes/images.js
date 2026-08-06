@@ -5,9 +5,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import sharp from 'sharp';
 import AdmZip from 'adm-zip';
+import { createHash } from 'node:crypto';
 import { nanoid } from 'nanoid';
 import { db, UPLOAD_DIR, logActivity } from '../db.js';
-import { requireRole } from '../middleware/roles.js';
 
 const router = Router({ mergeParams: true });
 
@@ -49,36 +49,123 @@ const zipUpload = multer({
   },
 });
 
+// GET /api/projects/:projectId/images - Paginated & Filtered images API
 router.get('/', (req, res) => {
   const { projectId } = req.params;
+  const { status, split, classId, search, q, assignedTo, completed, page: pageParam, limit: limitParam } = req.query;
 
-  // Phân công % công việc: nếu project ĐANG dùng tính năng gán việc (có ≥1 user
-  // percent > 0), annotator CHỈ thấy ảnh được gán cho chính mình — admin/reviewer
-  // luôn thấy toàn bộ (cần để duyệt/quản lý). Project chưa cấu hình phân công thì
-  // hành vi giữ nguyên như cũ (không lọc gì) — tương thích ngược 100%.
-  let assignmentFilter = '';
+  const isPaginated = pageParam !== undefined || limitParam !== undefined;
+
+  let page = parseInt(pageParam, 10);
+  if (isNaN(page) || page < 1) {
+    page = 1;
+  }
+
+  let limit;
+  if (isPaginated) {
+    limit = parseInt(limitParam, 10);
+    if (isNaN(limit) || limit < 1) {
+      limit = 50;
+    } else if (limit > 200) {
+      limit = 200;
+    }
+  } else {
+    limit = null;
+  }
+
+  const offset = isPaginated ? (page - 1) * limit : 0;
+
+  const searchQuery = search || q;
+
+  const conditions = ['i.project_id = ?'];
   const params = [projectId];
+
+  // Phân công % công việc rule
   if (req.user?.role === 'annotator') {
     const usingAssignment = db.prepare(
       'SELECT 1 FROM project_assignments WHERE project_id = ? AND percent > 0 LIMIT 1'
     ).get(projectId);
     if (usingAssignment) {
-      assignmentFilter = ' AND i.assigned_to = ?';
+      conditions.push('i.assigned_to = ?');
       params.push(req.user.id);
     }
   }
 
-  const images = db.prepare(`
+  if (status) {
+    conditions.push('i.status = ?');
+    params.push(status);
+  }
+
+  if (split) {
+    conditions.push('i.split = ?');
+    params.push(split);
+  }
+
+  if (assignedTo) {
+    const targetUid = assignedTo === 'me' ? req.user?.id : parseInt(assignedTo, 10);
+    if (targetUid) {
+      conditions.push('i.assigned_to = ?');
+      params.push(targetUid);
+    }
+  }
+
+  if (completed === 'true') {
+    conditions.push('i.completed_at IS NOT NULL');
+  } else if (completed === 'false') {
+    conditions.push('i.completed_at IS NULL');
+  }
+
+  if (searchQuery && searchQuery.trim()) {
+    conditions.push('(i.filename LIKE ? OR i.original_name LIKE ?)');
+    const pattern = `%${searchQuery.trim()}%`;
+    params.push(pattern, pattern);
+  }
+
+  if (classId) {
+    conditions.push('EXISTS (SELECT 1 FROM annotations a WHERE a.image_id = i.id AND a.class_id = ?)');
+    params.push(classId);
+  }
+
+  const whereClause = conditions.join(' AND ');
+
+  const countRow = db.prepare(`SELECT COUNT(*) AS total FROM images i WHERE ${whereClause}`).get(...params);
+  const total = countRow ? countRow.total : 0;
+  const totalPages = isPaginated ? (Math.ceil(total / limit) || 1) : 1;
+
+  let querySql = `
     SELECT i.*,
       (SELECT GROUP_CONCAT(DISTINCT a.class_id) FROM annotations a WHERE a.image_id = i.id) AS class_ids_raw
-    FROM images i WHERE i.project_id = ?${assignmentFilter} ORDER BY i.created_at ASC
-  `).all(...params);
-  res.json(images.map((i) => ({
+    FROM images i
+    WHERE ${whereClause}
+    ORDER BY i.created_at ASC
+  `;
+
+  const queryParams = [...params];
+  if (isPaginated) {
+    querySql += ' LIMIT ? OFFSET ?';
+    queryParams.push(limit, offset);
+  }
+
+  const images = db.prepare(querySql).all(...queryParams);
+
+  const formattedImages = images.map((i) => ({
     ...i,
     class_ids_raw: undefined,
     class_ids: i.class_ids_raw ? i.class_ids_raw.split(',') : [],
     thumbnail_url: `/api/images/${i.id}/thumb`,
-  })));
+  }));
+
+  if (isPaginated) {
+    return res.json({
+      images: formattedImages,
+      total,
+      page,
+      limit,
+      totalPages,
+    });
+  }
+
+  res.json(formattedImages);
 });
 
 router.get('/:imageId', (req, res) => {
@@ -87,7 +174,6 @@ router.get('/:imageId', (req, res) => {
   if (!image) return res.status(404).json({ error: 'Không tìm thấy ảnh' });
   const annotations = db.prepare('SELECT * FROM annotations WHERE image_id = ?').all(image.id)
     .map((a) => ({ ...a, points: a.points ? JSON.parse(a.points) : null }));
-  // STEP-3.4: Trả annotationVersion để client biết expectedVersion cho optimistic locking
   const { annotationVersion } = db.prepare(
     'SELECT COALESCE(MAX(version), 0) AS annotationVersion FROM annotation_history WHERE image_id = ?'
   ).get(image.id);
@@ -98,23 +184,25 @@ router.post('/upload', upload.array('images', MAX_FILES_PER_UPLOAD), async (req,
   const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.projectId);
   if (!project) return res.status(404).json({ error: 'Không tìm thấy project' });
 
-  const uploaderId = req.user?.id ?? null; // AD-A5: ghi người upload để enforce owner-delete
+  const uploaderId = req.user?.id ?? null;
   const created = [];
   const insert = db.prepare(`
-    INSERT INTO images (id, project_id, filename, original_name, width, height, uploaded_by)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO images (id, project_id, filename, original_name, width, height, uploaded_by, file_hash)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
   for (const file of req.files || []) {
     try {
+      const fileBuffer = fs.readFileSync(file.path);
+      const fileHash = createHash('md5').update(fileBuffer).digest('hex');
       const meta = await sharp(file.path).metadata();
       const id = nanoid();
-      insert.run(id, req.params.projectId, file.filename, file.originalname, meta.width || 0, meta.height || 0, uploaderId);
+      insert.run(id, req.params.projectId, file.filename, file.originalname, meta.width || 0, meta.height || 0, uploaderId, fileHash);
       created.push(db.prepare('SELECT * FROM images WHERE id = ?').get(id));
     } catch (e) {
       fs.unlink(file.path, () => {});
     }
   }
-  // STEP-3.3: ghi activity log sau khi upload thành công
+
   if (created.length > 0) {
     logActivity(req.params.projectId, req.user?.id ?? null, 'image_upload', {
       count: created.length,
@@ -137,8 +225,8 @@ router.post('/upload-zip', zipUpload.single('zip'), async (req, res) => {
   const created = [];
   let skipped = 0;
   const insert = db.prepare(`
-    INSERT INTO images (id, project_id, filename, original_name, width, height, uploaded_by)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO images (id, project_id, filename, original_name, width, height, uploaded_by, file_hash)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   try {
@@ -154,12 +242,13 @@ router.post('/upload-zip', zipUpload.single('zip'), async (req, res) => {
     for (const entry of entries) {
       try {
         const buffer = entry.getData();
+        const fileHash = createHash('md5').update(buffer).digest('hex');
         const meta = await sharp(buffer).metadata();
         const ext = path.extname(entry.entryName).toLowerCase() || '.jpg';
         const filename = `${nanoid()}${ext}`;
         fs.writeFileSync(path.join(destDir, filename), buffer);
         const id = nanoid();
-        insert.run(id, req.params.projectId, filename, path.basename(entry.entryName), meta.width || 0, meta.height || 0, uploaderId);
+        insert.run(id, req.params.projectId, filename, path.basename(entry.entryName), meta.width || 0, meta.height || 0, uploaderId, fileHash);
         created.push(db.prepare('SELECT * FROM images WHERE id = ?').get(id));
       } catch {
         skipped++;
@@ -171,7 +260,6 @@ router.post('/upload-zip', zipUpload.single('zip'), async (req, res) => {
     fs.unlink(req.file.path, () => {});
   }
 
-  // STEP-3.3: ghi activity log sau khi upload zip thành công
   if (created.length > 0) {
     logActivity(req.params.projectId, req.user?.id ?? null, 'image_upload', {
       count: created.length,
@@ -183,11 +271,6 @@ router.post('/upload-zip', zipUpload.single('zip'), async (req, res) => {
   res.status(201).json({ created, skipped });
 });
 
-// ── PATCH /batch — đổi split hàng loạt ─────────────────────────────────────
-// STEP-5.3 Body: { imageIds: string[], split: 'train' | 'valid' | 'test' }
-// Role: tất cả role đều được đổi split (cùng pattern PATCH /:imageId — không hạn chế split).
-// batch-assign-class: KHÔNG implement — class gắn với annotation, không phải image;
-// "gán class cho ảnh" sẽ tạo ra annotation không có bbox → vô nghĩa về mặt dữ liệu.
 router.patch('/batch', (req, res) => {
   const { imageIds, split } = req.body;
   if (!Array.isArray(imageIds) || imageIds.length === 0) {
@@ -221,10 +304,6 @@ router.patch('/batch', (req, res) => {
   res.json(updated);
 });
 
-// ── DELETE /batch — xoá nhiều ảnh ────────────────────────────────────────────
-// STEP-5.3 Body: { imageIds: string[] }
-// Role: annotator chỉ xoá ảnh mình upload; reviewer/admin xoá bất kỳ.
-//       Nếu 1 ảnh trong batch không đủ quyền → 403 toàn batch (không xoá 1 phần).
 router.delete('/batch', (req, res) => {
   const { imageIds } = req.body;
   if (!Array.isArray(imageIds) || imageIds.length === 0) {
@@ -242,7 +321,6 @@ router.delete('/batch', (req, res) => {
     return res.status(404).json({ error: `Không tìm thấy ảnh: ${missing.join(', ')}` });
   }
 
-  // Role check: annotator chỉ xoá ảnh mình upload; nếu 1 ảnh không đủ quyền → từ chối cả batch
   if (req.user?.role === 'annotator') {
     const unauthorized = found.filter(
       (img) => img.uploaded_by === null || img.uploaded_by !== req.user.id
@@ -256,12 +334,10 @@ router.delete('/batch', (req, res) => {
     }
   }
 
-  // Xoá file vật lý
   for (const img of found) {
     fs.unlink(path.join(UPLOAD_DIR, req.params.projectId, img.filename), () => {});
   }
 
-  // Xoá DB — CASCADE tự xoá annotations + annotation_history liên quan
   db.prepare(`DELETE FROM images WHERE id IN (${placeholders})`).run(...imageIds);
 
   logActivity(req.params.projectId, req.user?.id ?? null, 'batch_image_delete', {
@@ -279,7 +355,6 @@ router.patch('/:imageId', (req, res) => {
 
   const { split, status } = req.body;
 
-  // AD-A5: Bỏ đánh dấu "Xong" (status='unlabeled') của người khác → annotator không được
   if (status === 'unlabeled' && req.user?.role === 'annotator') {
     const isOwner = existing.uploaded_by !== null && existing.uploaded_by === req.user.id;
     if (!isOwner) {
@@ -290,7 +365,6 @@ router.patch('/:imageId', (req, res) => {
   db.prepare('UPDATE images SET split = ?, status = ? WHERE id = ?')
     .run(split ?? existing.split, status ?? existing.status, req.params.imageId);
 
-  // STEP-3.3: ghi log khi split thực sự thay đổi
   if (split !== undefined && split !== null && split !== existing.split) {
     logActivity(req.params.projectId, req.user?.id ?? null, 'split_change', {
       image_id: req.params.imageId,
@@ -302,10 +376,6 @@ router.patch('/:imageId', (req, res) => {
   res.json(db.prepare('SELECT * FROM images WHERE id = ?').get(req.params.imageId));
 });
 
-// ── POST /:imageId/mark-done ──────────────────────────────────────────────────
-// STEP-3.5: Đánh dấu ảnh đã hoàn thành label (tất cả role được phép).
-// Body: {} (không cần field nào)
-// Response: ImageItem với completed_at và completed_by đã cập nhật.
 router.post('/:imageId/mark-done', (req, res) => {
   const existing = db.prepare('SELECT * FROM images WHERE id = ? AND project_id = ?')
     .get(req.params.imageId, req.params.projectId);
@@ -323,10 +393,6 @@ router.post('/:imageId/mark-done', (req, res) => {
   res.json(db.prepare('SELECT * FROM images WHERE id = ?').get(req.params.imageId));
 });
 
-// ── DELETE /:imageId/mark-done ────────────────────────────────────────────────
-// STEP-3.5: Bỏ đánh dấu "Xong".
-// annotator: chỉ được bỏ done ảnh MÌnh đã mark (completed_by === req.user.id)
-// reviewer/admin: được bỏ done bất kỳ ảnh
 router.delete('/:imageId/mark-done', (req, res) => {
   const existing = db.prepare('SELECT * FROM images WHERE id = ? AND project_id = ?')
     .get(req.params.imageId, req.params.projectId);
@@ -339,7 +405,6 @@ router.delete('/:imageId/mark-done', (req, res) => {
     });
   }
 
-  // Role check: annotator chỉ được bỏ done của chính mình
   if (req.user?.role === 'annotator' && existing.completed_by !== req.user.id) {
     return res.status(403).json({
       error: 'AUTH_FORBIDDEN',
@@ -358,11 +423,10 @@ router.delete('/:imageId/mark-done', (req, res) => {
   res.json(db.prepare('SELECT * FROM images WHERE id = ?').get(req.params.imageId));
 });
 
-// AD-A5: Xoá ảnh MÌNH upload (annotator = self only; reviewer/admin = any)
 router.delete('/:imageId', (req, res) => {
   const existing = db.prepare('SELECT * FROM images WHERE id = ? AND project_id = ?')
     .get(req.params.imageId, req.params.projectId);
-  if (!existing) return res.status(204).end(); // idempotent
+  if (!existing) return res.status(204).end();
 
   if (req.user?.role === 'annotator') {
     const isOwner = existing.uploaded_by !== null && existing.uploaded_by === req.user.id;
@@ -374,7 +438,6 @@ router.delete('/:imageId', (req, res) => {
   fs.unlink(path.join(UPLOAD_DIR, req.params.projectId, existing.filename), () => {});
   db.prepare('DELETE FROM images WHERE id = ?').run(req.params.imageId);
 
-  // STEP-3.3: ghi log sau khi xoá ảnh thành công
   logActivity(req.params.projectId, req.user?.id ?? null, 'image_delete', {
     image_id: req.params.imageId,
     filename: existing.original_name,

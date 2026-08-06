@@ -161,3 +161,69 @@ export interface AssignmentCandidate {
   role: UserRole;
   color: string;
 }
+
+// ── Milestone 3: Dashboard & Analytics Types ─────────────────────────────────
+
+export interface RecentActivityItem {
+  id: number;
+  project_id: string;
+  actor_id: number;
+  actor_name: string | null;
+  action: string;
+  detail: any;
+  created_at: string;
+}
+
+export interface DashboardOverview {
+  totalProjects: number;
+  totalImages: number;
+  totalAnnotations: number;
+  totalUsers: number;
+  globalCompletionPercent: number;
+  recentActivity: RecentActivityItem[];
+}
+
+export interface ProjectDashboardData {
+  totalImages: number;
+  labeledImages: number;
+  unlabeledImages: number;
+  completedImages: number;
+  totalAnnotations: number;
+  reviewStatusBreakdown: {
+    draft: number;
+    in_review: number;
+    approved: number;
+    rejected: number;
+  };
+  datasetBalance: {
+    bySplit: { train: number; valid: number; test: number };
+    perClass: Array<{ class_id: string; name: string; color: string; count: number }>;
+  };
+  userProductivity: Array<{
+    userId: number;
+    username: string;
+    displayName: string;
+    imagesUploaded: number;
+    imagesCompleted: number;
+    annotationsCreated: number;
+  }>;
+}
+
+export interface UserReportItem {
+  userId: number;
+  username: string;
+  displayName: string;
+  role: UserRole;
+  imagesUploaded: number;
+  imagesCompleted: number;
+  annotationsCount: number;
+  speedAvg: number;
+}
+
+export interface TimelineReportItem {
+  date: string;
+  imagesAdded: number;
+  imagesCompleted: number;
+  annotationsCount: number;
+}
+

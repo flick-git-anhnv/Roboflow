@@ -1,15 +1,24 @@
-import type { Annotation, AssignmentCandidate, AutoLabelJob, ClassLabel, ImageItem, ImageWithAnnotations, ModelInfo, Project, ProjectAssignmentSummary, SuggestedBox, User, ValidateResult } from './types';
+import type { Annotation, AssignmentCandidate, AutoLabelJob, ClassLabel, DashboardOverview, ImageItem, ImageWithAnnotations, ModelInfo, Project, ProjectAssignmentSummary, ProjectDashboardData, RecentActivityItem, SuggestedBox, TimelineReportItem, User, UserReportItem, ValidateResult } from './types';
+
 
 // ── Token helpers ──────────────────────────────────────────────────────────────
 // Token stored as httpOnly cookie (server-set) AND cached in sessionStorage for
 // Bearer header (required when cookie not sent, e.g. Postman/CI tests).
 export function getToken(): string | null {
-  return sessionStorage.getItem('kztek_token');
+  try {
+    return sessionStorage.getItem('kztek_token');
+  } catch {
+    return null;
+  }
 }
 
 export function clearAuth() {
-  sessionStorage.removeItem('kztek_token');
-  sessionStorage.removeItem('kztek_user');
+  try {
+    sessionStorage.removeItem('kztek_token');
+    sessionStorage.removeItem('kztek_user');
+  } catch {
+    // Ignore storage access errors
+  }
 }
 
 // Đọc user hiện tại từ sessionStorage (cùng cách App.tsx cache sau getMe()).
@@ -253,7 +262,52 @@ export const api = {
     }),
   resetAssignments: (projectId: string) =>
     request<{ ok: true; unassigned: number }>(`/api/projects/${projectId}/assignments/reset`, { method: 'POST' }),
+
+  // ── Dashboard & Reports (Milestone 3) ─────────────────────────────────────
+  getDashboardOverview: () =>
+    request<DashboardOverview>('/api/dashboard/overview'),
+  getProjectDashboard: (projectId: string) =>
+    request<ProjectDashboardData>(`/api/projects/${projectId}/dashboard`),
+  getProjectUserReports: (projectId: string) =>
+    request<UserReportItem[]>(`/api/projects/${projectId}/reports/users`),
+  getProjectTimelineReports: (projectId: string, days = 30) =>
+    request<TimelineReportItem[]>(`/api/projects/${projectId}/reports/timeline?days=${days}`),
+  getReportExportUrl: (projectId: string, format: 'csv' | 'json' = 'csv') =>
+    `/api/projects/${projectId}/reports/export?format=${format}`,
+  downloadReport: async (projectId: string, format: 'csv' | 'json' = 'csv', projectName = 'project') => {
+    const token = getToken();
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch(`/api/projects/${projectId}/reports/export?format=${format}`, {
+      credentials: 'include',
+      headers,
+    });
+    if (!res.ok) {
+      let errorMsg = 'Không thể tải file báo cáo';
+      try {
+        const errData = await res.json();
+        if (errData.error) errorMsg = errData.error;
+      } catch {
+        // ignore
+      }
+      throw new Error(errorMsg);
+    }
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    try {
+      const a = document.createElement('a');
+      a.href = url;
+      const safeProjectName = (projectName || 'project').replace(/[^a-z0-9_-]/gi, '_');
+      a.download = `report_${safeProjectName}_${Date.now()}.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } finally {
+      window.URL.revokeObjectURL(url);
+    }
+  },
 };
+
 
 export interface SplitOptions {
   mode: 'manual' | 'auto';

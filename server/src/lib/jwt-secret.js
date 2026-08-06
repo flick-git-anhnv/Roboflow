@@ -24,7 +24,7 @@ export function getJwtSecret() {
     return _cachedSecret;
   }
 
-  const isProd = process.env.NODE_ENV && process.env.NODE_ENV !== 'development';
+  const isProd = process.env.NODE_ENV && process.env.NODE_ENV !== 'development' && process.env.NODE_ENV !== 'test';
   if (isProd) {
     console.error('[FATAL] AUTH_JWT_SECRET missing in production. Set AUTH_JWT_SECRET env variable.');
     process.exit(1);

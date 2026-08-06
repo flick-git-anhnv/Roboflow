@@ -83,11 +83,76 @@ export const AnnotatorToolbar: React.FC<AnnotatorToolbarProps> = ({
 }) => {
   const isCopyPrevDisabled = !prevImageItem || prevImageItem.status === 'unlabeled' || copyingLabels;
 
+  const [inputVal, setInputVal] = React.useState(String(currentIndex + 1));
+
+  React.useEffect(() => {
+    setInputVal(String(currentIndex + 1));
+  }, [currentIndex]);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setInputVal(e.target.value);
+  };
+
+  const commitIndex = () => {
+    const parsed = parseInt(inputVal, 10);
+    if (!isNaN(parsed) && parsed >= 1 && parsed <= totalImages) {
+      const delta = (parsed - 1) - currentIndex;
+      if (delta !== 0) {
+        onGoTo(delta);
+      }
+    } else {
+      setInputVal(String(currentIndex + 1));
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.currentTarget.blur();
+    }
+  };
+
+  const copyImageToClipboard = async () => {
+    const imageUrl = `/uploads/${projectId}/${currentImage.filename}`;
+    try {
+      const response = await fetch(imageUrl);
+      const blob = await response.blob();
+      let copyBlob = blob;
+      if (blob.type !== 'image/png') {
+        const img = new Image();
+        img.src = imageUrl;
+        await new Promise((resolve, reject) => {
+          img.onload = resolve;
+          img.onerror = reject;
+        });
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0);
+          const pngBlob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+          if (pngBlob) {
+            copyBlob = pngBlob;
+          }
+        }
+      }
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          [copyBlob.type]: copyBlob
+        })
+      ]);
+      alert('Đã copy ảnh vào clipboard!');
+    } catch (err: any) {
+      alert('Không thể copy ảnh: ' + err.message);
+    }
+  };
+
   return (
     <div className="annotator-toolbar">
       <Link to={`/projects/${projectId}`} className="btn btn-outline">← Quay lại project</Link>
       <button className="btn btn-outline" onClick={() => onGoTo(-1)} disabled={currentIndex <= 0}>‹ Ảnh trước</button>
       <button className="btn btn-outline" onClick={() => onGoTo(1)} disabled={currentIndex < 0 || currentIndex >= totalImages - 1}>Ảnh sau ›</button>
+      <button className="btn btn-outline" onClick={copyImageToClipboard} title="Copy ảnh hiện tại vào clipboard" style={{ fontSize: 12, padding: '2px 8px' }}>📸 Copy ảnh</button>
 
       <div className="tool-toggle">
         <button
@@ -178,7 +243,28 @@ export const AnnotatorToolbar: React.FC<AnnotatorToolbarProps> = ({
         {showFilmstrip ? '▼ Dải ảnh' : '▲ Dải ảnh'}
       </button>
 
-      <span style={{ fontSize: 13, color: '#666' }}>{currentIndex + 1} / {totalImages} — {currentImage.original_name}</span>
+      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+        <input
+          type="text"
+          value={inputVal}
+          onChange={handleInputChange}
+          onBlur={commitIndex}
+          onKeyDown={handleKeyDown}
+          style={{
+            width: 48,
+            height: 24,
+            textAlign: 'center',
+            border: '1px solid var(--border-color)',
+            borderRadius: 4,
+            background: 'var(--bg-card)',
+            color: 'var(--text-primary)',
+            fontSize: 12,
+            padding: '0 4px',
+            outline: 'none',
+          }}
+        />
+        <span style={{ fontSize: 13, color: '#666' }}>/ {totalImages} — {currentImage.original_name}</span>
+      </div>
       <span className={`save-status ${saveState}`}>
         {saveState === 'saved' ? '✓ Đã lưu' : saveState === 'saving' ? 'Đang lưu...' : 'Chưa lưu...'}
       </span>
@@ -200,9 +286,9 @@ export const AnnotatorToolbar: React.FC<AnnotatorToolbarProps> = ({
             className="btn btn-outline"
             disabled={doneBusy}
             onClick={onHandleMarkDone}
-            title="Xác nhận đã gán nhãn xong ảnh này (phím D)"
+            title="Xác nhận đã gán nhãn xong ảnh này và chuyển tiếp (phím Enter hoặc D)"
           >
-            ☐ Xong (D)
+            ☐ Xong (Enter)
           </button>
         )}
       </div>

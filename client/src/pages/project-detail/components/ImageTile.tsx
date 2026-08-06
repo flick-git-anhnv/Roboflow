@@ -57,25 +57,59 @@ export const ImageTile: React.FC<ImageTileProps> = ({
           </span>
         )}
       </div>
-      <img src={img.thumbnail_url || `/uploads/${projectId}/${img.filename}`} alt={img.original_name} loading="lazy" />
-      {img.completed_at && (
-        <span
-          title={`Hoàn thành lúc ${new Date(img.completed_at).toLocaleString('vi-VN')}`}
-          style={{
-            position: 'absolute',
-            bottom: 24,
-            right: 4,
-            fontSize: 10,
-            padding: '1px 5px',
-            borderRadius: 4,
-            color: '#fff',
-            background: '#1b5e20',
-            fontWeight: 600,
-          }}
-        >
-          ✓ Xong
-        </span>
-      )}
+      <div style={{
+        position: 'relative',
+        width: '100%',
+        height: '100%',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        overflow: 'hidden'
+      }}>
+        <div style={{
+          position: 'relative',
+          aspectRatio: `${img.width || 4} / ${img.height || 3}`,
+          maxWidth: '100%',
+          maxHeight: '100%',
+        }}>
+          <img
+            src={img.thumbnail_url || `/uploads/${projectId}/${img.filename}`}
+            alt={img.original_name}
+            loading="lazy"
+            style={{ width: '100%', height: '100%', display: 'block', objectFit: 'contain' }}
+          />
+          {img.annotations && img.annotations.length > 0 && (
+            <svg
+              viewBox={`0 0 ${img.width || 100} ${img.height || 100}`}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                pointerEvents: 'none',
+              }}
+            >
+              {img.annotations.map((ann, idx) => {
+                const cls = classById.get(ann.class_id);
+                const color = cls?.color || '#F05922';
+                return (
+                  <rect
+                    key={idx}
+                    x={ann.x}
+                    y={ann.y}
+                    width={ann.w}
+                    height={ann.h}
+                    fill="none"
+                    stroke={color}
+                    strokeWidth={Math.max(2, (img.width || 640) / 180)} // Scale stroke thickness
+                  />
+                );
+              })}
+            </svg>
+          )}
+        </div>
+      </div>
       <span className="split-badge"
         onClick={(e) => {
           e.preventDefault();
@@ -87,12 +121,65 @@ export const ImageTile: React.FC<ImageTileProps> = ({
         {img.split}
       </span>
       <button className="delete-btn" onClick={(e) => onRemoveImage(img, e)} title="Xoá ảnh">✕</button>
-      {img.class_ids && img.class_ids.length > 0 && (
-        <span className="class-dots" title={img.class_ids.map((id) => classById.get(id)?.name).filter(Boolean).join(', ')}>
-          {img.class_ids.slice(0, 5).map((id) => (
-            <i key={id} style={{ background: classById.get(id)?.color || '#999' }} />
-          ))}
+      {img.completed_at && (
+        <span
+          title={`Hoàn thành lúc ${new Date(img.completed_at).toLocaleString('vi-VN')}`}
+          style={{
+            position: 'absolute',
+            bottom: 4,
+            right: 32,
+            fontSize: '9px',
+            fontWeight: 600,
+            padding: '1px 4px',
+            borderRadius: 3,
+            color: '#fff',
+            background: '#2e7d32',
+            whiteSpace: 'nowrap',
+            textShadow: '0 1px 1px rgba(0,0,0,0.3)',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+            zIndex: 3,
+          }}
+        >
+          ✓ Xong
         </span>
+      )}
+      {img.class_ids && img.class_ids.length > 0 && (
+        <div
+          title={img.class_ids.map((id) => classById.get(id)?.name).filter(Boolean).join(', ')}
+          style={{
+            position: 'absolute',
+            bottom: 4,
+            left: 4,
+            right: img.completed_at ? 78 : 32,
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 3,
+            zIndex: 3,
+          }}
+        >
+          {img.class_ids.map((id, index) => {
+            const cls = classById.get(id);
+            if (!cls) return null;
+            return (
+              <span
+                key={`${id}-${index}`}
+                style={{
+                  fontSize: '9px',
+                  fontWeight: 600,
+                  padding: '1px 4px',
+                  borderRadius: 3,
+                  color: '#fff',
+                  background: cls.color || '#999',
+                  whiteSpace: 'nowrap',
+                  textShadow: '0 1px 1px rgba(0,0,0,0.3)',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                }}
+              >
+                {cls.name}
+              </span>
+            );
+          })}
+        </div>
       )}
     </Link>
   );

@@ -36,6 +36,7 @@ describe('Project Detail Components', () => {
         zipInputRef={zipRef}
         onOpenStats={vi.fn()}
         onOpenAutoLabel={vi.fn()}
+        onOpenModelManager={vi.fn()}
         onOpenValidate={vi.fn()}
         onOpenAssignment={vi.fn()}
         onOpenExport={vi.fn()}

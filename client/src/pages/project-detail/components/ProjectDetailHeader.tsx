@@ -8,6 +8,7 @@ interface ProjectDetailHeaderProps {
   zipInputRef: RefObject<HTMLInputElement>;
   onOpenStats: () => void;
   onOpenAutoLabel: () => void;
+  onOpenModelManager: () => void;
   onOpenValidate: () => void;
   onOpenAssignment: () => void;
   onOpenExport: () => void;
@@ -21,6 +22,7 @@ export const ProjectDetailHeader: React.FC<ProjectDetailHeaderProps> = ({
   zipInputRef,
   onOpenStats,
   onOpenAutoLabel,
+  onOpenModelManager,
   onOpenValidate,
   onOpenAssignment,
   onOpenExport,
@@ -35,6 +37,7 @@ export const ProjectDetailHeader: React.FC<ProjectDetailHeaderProps> = ({
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         <button className="btn btn-outline" onClick={onOpenStats}>📊 Thống kê</button>
         <button className="btn btn-outline" onClick={onOpenAutoLabel}>🤖 Auto Label</button>
+        <button className="btn btn-outline" onClick={onOpenModelManager}>⚙ Quản lý Model</button>
         <button className="btn btn-outline" onClick={onOpenValidate}>Kiểm tra dataset</button>
         <button className="btn btn-outline" onClick={onOpenAssignment}>👥 Phân công</button>
         <button className="btn btn-secondary" onClick={onOpenExport}>⬇ Export dataset</button>

@@ -4,7 +4,7 @@ import Logo from './components/Logo';
 import { getToken, clearAuth, api } from './api';
 import type { User } from './types';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
-import { Sun, Moon, LogOut, Users, Menu, X, User as UserIcon, LayoutDashboard, FolderKanban } from 'lucide-react';
+import { Sun, Moon, LogOut, Users, Menu, X, User as UserIcon, LayoutDashboard, FolderKanban, ChevronLeft } from 'lucide-react';
 
 const ProjectsPage = lazy(() => import('./pages/ProjectsPage'));
 const ProjectDetailPage = lazy(() => import('./pages/ProjectDetailPage'));
@@ -102,18 +102,43 @@ function AppShell() {
     });
   }
 
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('kztek_sidebar_collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const handleToggleSidebar = () => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('kztek_sidebar_collapsed', String(next));
+      } catch {}
+      return next;
+    });
+  };
+
   const isAnnotator = location.pathname.includes('/annotate/');
 
   return (
-    <div className={`app-shell ${isAnnotator ? 'annotator-mode' : 'has-sidebar'}`}>
+    <div className={`app-shell ${isAnnotator ? 'annotator-mode' : 'has-sidebar'} ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
       {!isAnnotator && (
         <aside className={`sidemenu ${mobileMenuOpen ? 'mobile-open' : ''}`}>
           <div className="sidemenu-brand">
             <Logo size={28} />
-            <div className="brand-text">
+            <div className="brand-text" style={{ flex: 1 }}>
               <span className="brand-title">KZTEK</span>
               <span className="brand-subtitle">Labeling Studio</span>
             </div>
+            <button
+              onClick={handleToggleSidebar}
+              className="btn-collapse-sidebar"
+              title="Thu gọn menu"
+            >
+              <ChevronLeft size={18} />
+            </button>
           </div>
 
           <nav className="sidemenu-nav">
@@ -163,14 +188,27 @@ function AppShell() {
       <div className="app-content-wrapper">
         {!isAnnotator && (
           <header className="topbar-minimal">
-            <button
-              className="mobile-menu-toggle"
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              aria-label="Toggle navigation menu"
-              style={{ display: 'none' }} /* controlled via CSS media queries */
-            >
-              {mobileMenuOpen ? <X size={22} /> : <Menu size={22} />}
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <button
+                className="mobile-menu-toggle"
+                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                aria-label="Toggle navigation menu"
+                style={{ display: 'none' }} /* controlled via CSS media queries */
+              >
+                {mobileMenuOpen ? <X size={22} /> : <Menu size={22} />}
+              </button>
+
+              {sidebarCollapsed && (
+                <button
+                  className="desktop-menu-toggle"
+                  onClick={handleToggleSidebar}
+                  aria-label="Mở menu bên"
+                  title="Mở menu bên"
+                >
+                  <Menu size={22} />
+                </button>
+              )}
+            </div>
             <span className="topbar-subtitle">Công cụ gán nhãn ảnh nội bộ v2.0</span>
           </header>
         )}

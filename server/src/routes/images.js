@@ -134,7 +134,8 @@ router.get('/', (req, res) => {
 
   let querySql = `
     SELECT i.*,
-      (SELECT GROUP_CONCAT(DISTINCT a.class_id) FROM annotations a WHERE a.image_id = i.id) AS class_ids_raw
+      (SELECT GROUP_CONCAT(class_id) FROM (SELECT class_id FROM annotations WHERE image_id = i.id ORDER BY x ASC)) AS class_ids_raw,
+      (SELECT json_group_array(json_object('id', id, 'image_id', image_id, 'class_id', class_id, 'x', x, 'y', y, 'w', w, 'h', h, 'type', type)) FROM annotations WHERE image_id = i.id) AS annotations_raw
     FROM images i
     WHERE ${whereClause}
     ORDER BY i.created_at ASC
@@ -151,7 +152,9 @@ router.get('/', (req, res) => {
   const formattedImages = images.map((i) => ({
     ...i,
     class_ids_raw: undefined,
+    annotations_raw: undefined,
     class_ids: i.class_ids_raw ? i.class_ids_raw.split(',') : [],
+    annotations: i.annotations_raw ? JSON.parse(i.annotations_raw) : [],
     thumbnail_url: `/api/images/${i.id}/thumb`,
   }));
 

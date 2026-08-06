@@ -12,7 +12,6 @@ export function useBatchSelection(
 
   const toggleSelect = useCallback((id: string, e?: React.MouseEvent | React.ChangeEvent | any) => {
     if (e) {
-      if (typeof e.preventDefault === 'function') e.preventDefault();
       if (typeof e.stopPropagation === 'function') e.stopPropagation();
     }
     setSelectedIds((prev) => {

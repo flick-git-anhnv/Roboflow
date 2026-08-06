@@ -11,7 +11,7 @@ import AssignmentModal from '../../components/AssignmentModal';
 import ProjectDetailHeader from './components/ProjectDetailHeader';
 import ClassManagerPanel from './components/ClassManagerPanel';
 import ClassImportModal from './components/ClassImportModal';
-import ModelManagerPanel from './components/ModelManagerPanel';
+import ModelManagerModal from '../../components/ModelManagerModal';
 import UploadDropzone from './components/UploadDropzone';
 import ImageFilterBar from './components/ImageFilterBar';
 import BatchActionsBar from './components/BatchActionsBar';
@@ -35,6 +35,7 @@ export default function ProjectDetailPage() {
   const [exportOpen, setExportOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
   const [autoLabelOpen, setAutoLabelOpen] = useState(false);
+  const [modelManagerOpen, setModelManagerOpen] = useState(false);
   const [validateOpen, setValidateOpen] = useState(false);
   const [assignmentOpen, setAssignmentOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -150,6 +151,7 @@ export default function ProjectDetailPage() {
         zipInputRef={zipInputRef}
         onOpenStats={() => setStatsOpen(true)}
         onOpenAutoLabel={() => setAutoLabelOpen(true)}
+        onOpenModelManager={() => setModelManagerOpen(true)}
         onOpenValidate={() => setValidateOpen(true)}
         onOpenAssignment={() => setAssignmentOpen(true)}
         onOpenExport={() => setExportOpen(true)}
@@ -158,35 +160,6 @@ export default function ProjectDetailPage() {
 
       <div className="detail-layout">
         <div className="side-panel">
-          <ClassManagerPanel
-            classes={classes}
-            onAddClass={addClass}
-            onUpdateClass={updateClass}
-            onRemoveClass={(cls) => removeClass(cls, (id) => setClassFilter((prev) => prev.filter((cId) => cId !== id)))}
-            onImportClasses={() => setImportOpen(true)}
-            onRemoveAllClasses={removeAllClasses}
-          />
-
-          <div>
-            <h4>Thống kê</h4>
-            <div className="project-stats" style={{ flexDirection: 'column', gap: 6 }}>
-              <span>Tổng ảnh: <b>{images.length}</b></span>
-              <span>Đã gán nhãn: <b>{labeledCount}</b></span>
-              <span>Chưa gán: <b>{images.length - labeledCount}</b></span>
-            </div>
-          </div>
-
-          <ModelManagerPanel
-            projectId={projectId}
-            project={project}
-            models={models}
-            canReview={canReview}
-            onRefreshData={load}
-            onShowToast={showToast}
-          />
-        </div>
-
-        <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, padding: '0 4px' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', fontWeight: 500, userSelect: 'none' }}>
               <input
@@ -208,6 +181,26 @@ export default function ProjectDetailPage() {
             onHandleFiles={handleFiles}
           />
 
+          <ClassManagerPanel
+            classes={classes}
+            onAddClass={addClass}
+            onUpdateClass={updateClass}
+            onRemoveClass={(cls) => removeClass(cls, (id) => setClassFilter((prev) => prev.filter((cId) => cId !== id)))}
+            onImportClasses={() => setImportOpen(true)}
+            onRemoveAllClasses={removeAllClasses}
+          />
+
+          <div>
+            <h4>Thống kê</h4>
+            <div className="project-stats" style={{ flexDirection: 'column', gap: 6 }}>
+              <span>Tổng ảnh: <b>{images.length}</b></span>
+              <span>Đã gán nhãn: <b>{labeledCount}</b></span>
+              <span>Chưa gán: <b>{images.length - labeledCount}</b></span>
+            </div>
+          </div>
+        </div>
+
+        <div>
           <ImageFilterBar
             search={search}
             statusFilter={statusFilter}
@@ -285,6 +278,18 @@ export default function ProjectDetailPage() {
             setClasses(updatedClasses);
             showToast('Nhập danh sách nhãn thành công!');
           }}
+        />
+      )}
+
+      {modelManagerOpen && project && (
+        <ModelManagerModal
+          projectId={project.id}
+          project={project}
+          models={models}
+          canReview={canReview}
+          onRefreshData={load}
+          onShowToast={showToast}
+          onClose={() => setModelManagerOpen(false)}
         />
       )}
 

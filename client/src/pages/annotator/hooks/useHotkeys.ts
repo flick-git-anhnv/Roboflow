@@ -163,6 +163,13 @@ export function useHotkeys({
 
       if (e.key === 'ArrowRight') onGoTo(1);
       if (e.key === 'ArrowLeft') onGoTo(-1);
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        if (!image?.completed_at) {
+          onHandleMarkDone();
+        }
+        onGoTo(1);
+      }
       if ((e.key === 'd' || e.key === 'D') && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         if (image?.completed_at) { onHandleUnmarkDone(); } else { onHandleMarkDone(); }

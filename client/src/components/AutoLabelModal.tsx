@@ -17,11 +17,40 @@ export default function AutoLabelModal({
 }) {
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [modelId, setModelId] = useState<string>('');
-  const [confidence, setConfidence] = useState(0.25);
+  const [confidence, setConfidence] = useState(() => {
+    try {
+      const saved = localStorage.getItem('autolabel_confidence');
+      return saved ? parseFloat(saved) : 0.25;
+    } catch {
+      return 0.25;
+    }
+  });
   const [scope, setScope] = useState<Scope>(
     selectedImageIds && selectedImageIds.size > 0 ? 'selected' : 'unlabeled'
   );
-  const [overwrite, setOverwrite] = useState(false);
+  const [overwrite, setOverwrite] = useState(() => {
+    try {
+      const saved = localStorage.getItem('autolabel_overwrite');
+      return saved === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const handleConfidenceChange = (val: number) => {
+    setConfidence(val);
+    try {
+      localStorage.setItem('autolabel_confidence', String(val));
+    } catch {}
+  };
+
+  const handleOverwriteChange = (val: boolean) => {
+    setOverwrite(val);
+    try {
+      localStorage.setItem('autolabel_overwrite', String(val));
+    } catch {}
+  };
+
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
   const [job, setJob] = useState<AutoLabelJob | null>(null);
@@ -119,10 +148,10 @@ export default function AutoLabelModal({
               )}
             </div>
 
-            <div className="field">
+             <div className="field">
               <label>Ngưỡng tin cậy (confidence) — {Math.round(confidence * 100)}%</label>
               <input type="range" min={0.05} max={0.9} step={0.05} value={confidence}
-                onChange={(e) => setConfidence(parseFloat(e.target.value))} />
+                onChange={(e) => handleConfidenceChange(parseFloat(e.target.value))} />
             </div>
 
             <div className="field">
@@ -147,7 +176,7 @@ export default function AutoLabelModal({
 
             {(scope === 'all' || scope === 'selected') && (
               <label className="overwrite-check">
-                <input type="checkbox" checked={overwrite} onChange={(e) => setOverwrite(e.target.checked)} />
+                <input type="checkbox" checked={overwrite} onChange={(e) => handleOverwriteChange(e.target.checked)} />
                 Ghi đè nhãn đã có sẵn (nếu bỏ chọn, ảnh đã gán nhãn sẽ được giữ nguyên)
               </label>
             )}

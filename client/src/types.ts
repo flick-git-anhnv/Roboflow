@@ -54,6 +54,7 @@ export interface ImageItem {
   /** STEP-3.5: Annotator đã xác nhận xong (completed_at IS NOT NULL). */
   completed_at?: string | null;
   completed_by?: number | null;
+  annotations?: Annotation[];
 }
 
 export type AnnotationType = 'bbox' | 'quad';

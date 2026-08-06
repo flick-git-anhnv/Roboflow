@@ -469,7 +469,15 @@ export default function AnnotatorPage() {
         const handle = hitTestHandle(sel, x, y);
         if (handle !== null) {
           preDragSnapshotRef.current = boxesRef.current.map(cloneBox);
-          dragRef.current = { mode: 'resize', handle, startX: x, startY: y, orig: cloneBox(sel) };
+          const isGroupResize = selectedIds.size > 1 && selectedIds.has(sel.id);
+          dragRef.current = {
+            mode: 'resize',
+            handle,
+            startX: x,
+            startY: y,
+            orig: cloneBox(sel),
+            groupOrig: isGroupResize ? boxesRef.current.filter((b) => selectedIds.has(b.id)).map(cloneBox) : undefined,
+          };
           attachWindowDragListeners();
           return;
         }
@@ -543,6 +551,8 @@ export default function AnnotatorPage() {
     const { x, y } = toImageCoords(clientX, clientY);
     const drag = dragRef.current;
     if (drag.mode === 'none') return;
+    const imageW = image?.width || 0;
+    const imageH = image?.height || 0;
 
     if (drag.mode === 'draw') {
       const x0 = Math.min(drag.startX, x), y0 = Math.min(drag.startY, y);
@@ -556,7 +566,7 @@ export default function AnnotatorPage() {
       const targetId = drag.orig.id;
       let dx = x - drag.startX, dy = y - drag.startY;
       const orig = drag.orig;
-      const w = image?.width || 0, h = image?.height || 0;
+      const w = imageW, h = imageH;
 
       if (drag.groupOrig && drag.groupOrig.length > 1) {
         let minDx = -Infinity, maxDx = Infinity, minDy = -Infinity, maxDy = Infinity;
@@ -592,19 +602,84 @@ export default function AnnotatorPage() {
     } else if (drag.mode === 'resize' && drag.orig) {
       const targetId = drag.orig.id;
       const orig = drag.orig;
+      
+      // 1. Calculate the new points/coordinates for the primary box first (as reference)
+      let newPrimaryPoints: [Point, Point, Point, Point] | undefined = undefined;
+      let pnx = orig.x, pny = orig.y, pnw = orig.w, pnh = orig.h;
+
       if (typeof drag.handle === 'number' && orig.points) {
         const newPoints = orig.points.map((p) => ({ ...p })) as [Point, Point, Point, Point];
         newPoints[drag.handle] = { x, y };
-        setBoxes((prev) => prev.map((b) => (b.id === targetId ? { ...b, points: newPoints, ...boundingRect(newPoints) } : b)));
+        newPrimaryPoints = newPoints;
+        const rect = boundingRect(newPoints);
+        pnx = rect.x;
+        pny = rect.y;
+        pnw = rect.w;
+        pnh = rect.h;
       } else {
-        let nx = orig.x, ny = orig.y, nw = orig.w, nh = orig.h;
-        if (drag.handle === 'se') { nw = x - orig.x; nh = y - orig.y; }
-        if (drag.handle === 'ne') { nw = x - orig.x; nh = orig.y + orig.h - y; ny = y; }
-        if (drag.handle === 'sw') { nw = orig.x + orig.w - x; nh = y - orig.y; nx = x; }
-        if (drag.handle === 'nw') { nw = orig.x + orig.w - x; nh = orig.y + orig.h - y; nx = x; ny = y; }
-        if (nw < 0) { nx += nw; nw = -nw; }
-        if (nh < 0) { ny += nh; nh = -nh; }
-        setBoxes((prev) => prev.map((b) => (b.id === targetId ? { ...b, x: nx, y: ny, w: nw, h: nh } : b)));
+        if (drag.handle === 'se') { pnw = x - orig.x; pnh = y - orig.y; }
+        else if (drag.handle === 'ne') { pnw = x - orig.x; pnh = orig.y + orig.h - y; pny = y; }
+        else if (drag.handle === 'sw') { pnw = orig.x + orig.w - x; pnh = y - orig.y; pnx = x; }
+        else if (drag.handle === 'nw') { pnw = orig.x + orig.w - x; pnh = orig.y + orig.h - y; pnx = x; pny = y; }
+        if (pnw < 0) { pnx += pnw; pnw = -pnw; }
+        if (pnh < 0) { pny += pnh; pny = -pnh; }
+      }
+
+      // 2. Compute scale factors and anchor point
+      const scaleX = orig.w > 0 ? pnw / orig.w : 1;
+      const scaleY = orig.h > 0 ? pnh / orig.h : 1;
+
+      let ax = orig.x;
+      let ay = orig.y;
+      if (typeof drag.handle === 'number' && orig.points) {
+        const oppIdx = (drag.handle + 2) % 4;
+        ax = orig.points[oppIdx].x;
+        ay = orig.points[oppIdx].y;
+      } else {
+        if (drag.handle === 'se') { ax = orig.x; ay = orig.y; }
+        else if (drag.handle === 'ne') { ax = orig.x; ay = orig.y + orig.h; }
+        else if (drag.handle === 'sw') { ax = orig.x + orig.w; ay = orig.y; }
+        else if (drag.handle === 'nw') { ax = orig.x + orig.w; ay = orig.y + orig.h; }
+      }
+
+      // 3. Apply resize/scale to all boxes in selection group
+      if (drag.groupOrig && drag.groupOrig.length > 1) {
+        const groupOrig = drag.groupOrig;
+        setBoxes((prev) => prev.map((b) => {
+          const o = groupOrig.find((g) => g.id === b.id);
+          if (!o) return b;
+
+          if (o.type === 'quad' && o.points) {
+            const newPoints = o.points.map((pt) => {
+              const rx = ax + (pt.x - ax) * scaleX;
+              const ry = ay + (pt.y - ay) * scaleY;
+              return {
+                x: clamp(rx, 0, imageW),
+                y: clamp(ry, 0, imageH)
+              };
+            }) as [Point, Point, Point, Point];
+            return { ...b, points: newPoints, ...boundingRect(newPoints) };
+          } else {
+            const nx1 = ax + (o.x - ax) * scaleX;
+            const nx2 = ax + (o.x + o.w - ax) * scaleX;
+            const ny1 = ay + (o.y - ay) * scaleY;
+            const ny2 = ay + (o.y + o.h - ay) * scaleY;
+
+            const rx = clamp(Math.min(nx1, nx2), 0, imageW);
+            const ry = clamp(Math.min(ny1, ny2), 0, imageH);
+            const rw = clamp(Math.max(nx1, nx2), 0, imageW) - rx;
+            const rh = clamp(Math.max(ny1, ny2), 0, imageH) - ry;
+
+            return { ...b, x: rx, y: ry, w: rw, h: rh };
+          }
+        }));
+      } else {
+        // Single box resize
+        if (typeof drag.handle === 'number' && newPrimaryPoints) {
+          setBoxes((prev) => prev.map((b) => (b.id === targetId ? { ...b, points: newPrimaryPoints, ...boundingRect(newPrimaryPoints) } : b)));
+        } else {
+          setBoxes((prev) => prev.map((b) => (b.id === targetId ? { ...b, x: pnx, y: pny, w: pnw, h: pnh } : b)));
+        }
       }
     }
   };

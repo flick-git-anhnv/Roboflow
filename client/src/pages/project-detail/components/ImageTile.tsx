@@ -31,23 +31,33 @@ export const ImageTile: React.FC<ImageTileProps> = ({
           border: '2px solid #251C53', borderRadius: 'inherit', pointerEvents: 'none', zIndex: 1,
         }} />
       )}
-      <label
-        style={{ position: 'absolute', top: 4, left: 4, zIndex: 3, cursor: 'pointer', lineHeight: 0 }}
-        title="Chọn ảnh này"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <input
-          type="checkbox"
-          checked={isSelected}
-          onChange={(e) => onToggleSelect(img.id, e)}
+      <div className="tile-controls">
+        <label
+          style={{ cursor: 'pointer', lineHeight: 0, display: 'flex', alignItems: 'center' }}
+          title="Chọn ảnh này"
           onClick={(e) => e.stopPropagation()}
-          style={{ width: 15, height: 15, cursor: 'pointer' }}
-        />
-      </label>
+        >
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={(e) => onToggleSelect(img.id, e)}
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: 14, height: 14, cursor: 'pointer', margin: 0 }}
+          />
+        </label>
+        <span className={`badge ${img.status === 'labeled' ? 'labeled' : ''}`} style={{ position: 'static' }}>
+          {img.status === 'labeled' ? 'Đã gán' : 'Chưa gán'}
+        </span>
+        {img.review_status && img.review_status !== 'draft' && (
+          <span
+            className={`review-badge review-${img.review_status}`}
+            title={img.review_comment || ''}
+          >
+            {REVIEW_LABEL[img.review_status]}
+          </span>
+        )}
+      </div>
       <img src={img.thumbnail_url || `/uploads/${projectId}/${img.filename}`} alt={img.original_name} loading="lazy" />
-      <span className={`badge ${img.status === 'labeled' ? 'labeled' : ''}`}>
-        {img.status === 'labeled' ? 'Đã gán' : 'Chưa gán'}
-      </span>
       {img.completed_at && (
         <span
           title={`Hoàn thành lúc ${new Date(img.completed_at).toLocaleString('vi-VN')}`}
@@ -64,26 +74,6 @@ export const ImageTile: React.FC<ImageTileProps> = ({
           }}
         >
           ✓ Xong
-        </span>
-      )}
-      {img.review_status && img.review_status !== 'draft' && (
-        <span
-          className={`review-badge review-${img.review_status}`}
-          title={img.review_comment || ''}
-          style={{
-            position: 'absolute',
-            top: 4,
-            left: 4,
-            fontSize: 11,
-            padding: '2px 6px',
-            borderRadius: 4,
-            color: '#fff',
-            background:
-              img.review_status === 'approved' ? '#2e7d32' :
-              img.review_status === 'rejected' ? '#F05922' : '#4A3F8C',
-          }}
-        >
-          {REVIEW_LABEL[img.review_status]}
         </span>
       )}
       <span className="split-badge"

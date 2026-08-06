@@ -18,24 +18,36 @@ export async function getFilesFromDataTransfer(dataTransfer: DataTransfer): Prom
   return files;
 }
 
-function walkEntry(entry: any, out: File[]): Promise<void> {
-  return new Promise((resolve) => {
+async function walkEntry(entry: any, out: File[]): Promise<void> {
+  if (!entry) return;
+  try {
     if (entry.isFile) {
-      entry.file((file: File) => { out.push(file); resolve(); }, () => resolve());
+      await new Promise<void>((resolve) => {
+        entry.file(
+          (file: File) => {
+            out.push(file);
+            resolve();
+          },
+          () => resolve()
+        );
+      });
     } else if (entry.isDirectory) {
       const reader = entry.createReader();
-      const readBatch = () => {
-        reader.readEntries(async (batch: any[]) => {
-          if (!batch.length) { resolve(); return; }
-          await Promise.all(batch.map((e) => walkEntry(e, out)));
-          readBatch();
-        }, () => resolve());
+      const readEntries = () => {
+        return new Promise<any[]>((resolve, reject) => {
+          reader.readEntries(resolve, reject);
+        });
       };
-      readBatch();
-    } else {
-      resolve();
+
+      while (true) {
+        const batch = await readEntries();
+        if (!batch || !batch.length) break;
+        await Promise.all(batch.map((e) => walkEntry(e, out)));
+      }
     }
-  });
+  } catch (err) {
+    console.error('Error walking entry:', err);
+  }
 }
 
 export function isImageFile(file: File) {

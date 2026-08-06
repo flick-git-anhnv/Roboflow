@@ -40,6 +40,13 @@ export function useProjectDetailData(projectId: string | undefined) {
     if (onClassRemoved) onClassRemoved(cls.id);
   };
 
+  const removeAllClasses = async () => {
+    if (!projectId) return;
+    if (!confirm('Bạn có chắc chắn muốn xoá TẤT CẢ nhãn trong dự án này? Toàn bộ annotation dùng các nhãn này cũng sẽ bị xoá.')) return;
+    await api.deleteAllClasses(projectId);
+    setClasses([]);
+  };
+
   const removeImage = async (img: ImageItem, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -70,6 +77,7 @@ export function useProjectDetailData(projectId: string | undefined) {
     addClass,
     updateClass,
     removeClass,
+    removeAllClasses,
     removeImage,
     changeSplit,
   };

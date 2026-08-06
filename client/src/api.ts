@@ -110,22 +110,33 @@ export const api = {
     }),
   deleteClass: (projectId: string, classId: string) =>
     request<void>(`/api/projects/${projectId}/classes/${classId}`, { method: 'DELETE' }),
+  importLocalYaml: (projectId: string, filePath: string) =>
+    request<ClassLabel[]>(`/api/projects/${projectId}/classes/import-local-yaml`, {
+      method: 'POST',
+      body: JSON.stringify({ filePath }),
+    }),
+  importBulkClasses: (projectId: string, names: string[]) =>
+    request<ClassLabel[]>(`/api/projects/${projectId}/classes/import-bulk`, {
+      method: 'POST',
+      body: JSON.stringify({ names }),
+    }),
+  deleteAllClasses: (projectId: string) =>
+    request<void>(`/api/projects/${projectId}/classes`, { method: 'DELETE' }),
 
-  listImages: (projectId: string) => request<ImageItem[]>(`/api/projects/${projectId}/images`),
+  listImages: (projectId: string) => request<ImageItem[]>(`/api/projects/${projectId}/images?t=${Date.now()}`),
   getImage: (projectId: string, imageId: string) =>
     request<ImageWithAnnotations>(`/api/projects/${projectId}/images/${imageId}`),
-  uploadImages: async (projectId: string, files: FileList | File[]) => {
+  uploadImages: async (projectId: string, files: FileList | File[], checkDuplicate?: boolean) => {
     const form = new FormData();
     Array.from(files).forEach((f) => form.append('images', f));
-    return request<ImageItem[]>(`/api/projects/${projectId}/images/upload`, { method: 'POST', body: form });
+    const url = `/api/projects/${projectId}/images/upload` + (checkDuplicate ? '?checkDuplicate=true' : '');
+    return request<any>(url, { method: 'POST', body: form });
   },
-  uploadZip: async (projectId: string, file: File) => {
+  uploadZip: async (projectId: string, file: File, checkDuplicate?: boolean) => {
     const form = new FormData();
     form.append('zip', file);
-    return request<{ created: ImageItem[]; skipped: number }>(
-      `/api/projects/${projectId}/images/upload-zip`,
-      { method: 'POST', body: form }
-    );
+    const url = `/api/projects/${projectId}/images/upload-zip` + (checkDuplicate ? '?checkDuplicate=true' : '');
+    return request<any>(url, { method: 'POST', body: form });
   },
   updateImage: (projectId: string, imageId: string, patch: { split?: string; status?: string }) =>
     request<ImageItem>(`/api/projects/${projectId}/images/${imageId}`, {
@@ -176,7 +187,7 @@ export const api = {
 
   startAutoLabel: (
     projectId: string,
-    opts: { model_id: string; confidence: number; scope: 'all' | 'unlabeled'; overwrite: boolean }
+    opts: { model_id: string; confidence: number; scope: 'all' | 'unlabeled' | 'selected'; overwrite: boolean; image_ids?: string[] }
   ) =>
     request<{ jobId: string; total: number }>(`/api/projects/${projectId}/auto-label`, {
       method: 'POST',

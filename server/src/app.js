@@ -71,7 +71,13 @@ app.use(slowRequestLogger);
 // 5. Cookie parser
 app.use(cookieParser());
 
-// 6. Public health endpoint
+// 6. Prevent caching for all API requests
+app.use('/api', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  next();
+});
+
+// 7. Public health endpoint
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
 // 7. Auth router

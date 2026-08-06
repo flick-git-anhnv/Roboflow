@@ -184,33 +184,105 @@ router.post('/upload', upload.array('images', MAX_FILES_PER_UPLOAD), async (req,
   const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.projectId);
   if (!project) return res.status(404).json({ error: 'Không tìm thấy project' });
 
+  const checkDuplicate = req.query.checkDuplicate === 'true' || req.body.checkDuplicate === 'true';
   const uploaderId = req.user?.id ?? null;
+  const files = req.files || [];
+  let duplicated = 0;
+
+  // 1. Process files in parallel (hashing & sharp metadata extraction)
+  const processedFiles = await Promise.all(
+    files.map(async (file) => {
+      try {
+        const fileBuffer = fs.readFileSync(file.path);
+        const fileHash = createHash('md5').update(fileBuffer).digest('hex');
+
+        if (checkDuplicate) {
+          const existing = db.prepare('SELECT 1 FROM images WHERE project_id = ? AND file_hash = ? LIMIT 1')
+            .get(req.params.projectId, fileHash);
+          if (existing) {
+            fs.unlink(file.path, () => {});
+            return { type: 'duplicate' };
+          }
+        }
+
+        const meta = await sharp(file.path).metadata();
+        return {
+          type: 'valid',
+          item: {
+            id: nanoid(),
+            projectId: req.params.projectId,
+            filename: file.filename,
+            originalname: file.originalname,
+            width: meta.width || 0,
+            height: meta.height || 0,
+            uploaderId,
+            fileHash,
+            tempPath: file.path,
+          }
+        };
+      } catch (e) {
+        fs.unlink(file.path, () => {});
+        return { type: 'error' };
+      }
+    })
+  );
+
+  const validItems = [];
+  for (const r of processedFiles) {
+    if (r.type === 'valid') validItems.push(r.item);
+    else if (r.type === 'duplicate') duplicated++;
+  }
+
   const created = [];
-  const insert = db.prepare(`
-    INSERT INTO images (id, project_id, filename, original_name, width, height, uploaded_by, file_hash)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  for (const file of req.files || []) {
+  if (validItems.length > 0) {
+    const insert = db.prepare(`
+      INSERT INTO images (id, project_id, filename, original_name, width, height, uploaded_by, file_hash)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    // 2. Perform all database insertions in a single transaction
+    const insertTx = db.transaction((items) => {
+      for (const item of items) {
+        insert.run(
+          item.id,
+          item.projectId,
+          item.filename,
+          item.originalname,
+          item.width,
+          item.height,
+          item.uploaderId,
+          item.fileHash
+        );
+      }
+    });
+
     try {
-      const fileBuffer = fs.readFileSync(file.path);
-      const fileHash = createHash('md5').update(fileBuffer).digest('hex');
-      const meta = await sharp(file.path).metadata();
-      const id = nanoid();
-      insert.run(id, req.params.projectId, file.filename, file.originalname, meta.width || 0, meta.height || 0, uploaderId, fileHash);
-      created.push(db.prepare('SELECT * FROM images WHERE id = ?').get(id));
-    } catch (e) {
-      fs.unlink(file.path, () => {});
+      insertTx(validItems);
+
+      // 3. Batch query the inserted items back from the database
+      const placeholders = validItems.map(() => '?').join(',');
+      const inserted = db.prepare(`SELECT * FROM images WHERE id IN (${placeholders})`)
+        .all(...validItems.map((item) => item.id));
+      created.push(...inserted);
+
+      logActivity(req.params.projectId, req.user?.id ?? null, 'image_upload', {
+        count: created.length,
+        names: created.map((i) => i.original_name),
+      });
+    } catch (err) {
+      // Cleanup temp files if transaction fails
+      for (const item of validItems) {
+        fs.unlink(item.tempPath, () => {});
+      }
+      return res.status(500).json({ error: 'Lỗi lưu trữ cơ sở dữ liệu: ' + err.message });
     }
   }
 
-  if (created.length > 0) {
-    logActivity(req.params.projectId, req.user?.id ?? null, 'image_upload', {
-      count: created.length,
-      names: created.map((i) => i.original_name),
-    });
+  if (checkDuplicate) {
+    res.status(201).json({ created, duplicated });
+  } else {
+    res.status(201).json(created);
   }
-
-  res.status(201).json(created);
 });
 
 router.post('/upload-zip', zipUpload.single('zip'), async (req, res) => {
@@ -218,16 +290,13 @@ router.post('/upload-zip', zipUpload.single('zip'), async (req, res) => {
   if (!project) return res.status(404).json({ error: 'Không tìm thấy project' });
   if (!req.file) return res.status(400).json({ error: 'Không nhận được file zip' });
 
+  const checkDuplicate = req.query.checkDuplicate === 'true' || req.body.checkDuplicate === 'true';
   const destDir = path.join(UPLOAD_DIR, req.params.projectId);
   fs.mkdirSync(destDir, { recursive: true });
 
   const uploaderId = req.user?.id ?? null;
-  const created = [];
   let skipped = 0;
-  const insert = db.prepare(`
-    INSERT INTO images (id, project_id, filename, original_name, width, height, uploaded_by, file_hash)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `);
+  let duplicated = 0;
 
   try {
     const zip = new AdmZip(req.file.path);
@@ -239,36 +308,103 @@ router.post('/upload-zip', zipUpload.single('zip'), async (req, res) => {
       return res.status(400).json({ error: `File zip chứa quá nhiều ảnh (tối đa ${MAX_FILES_PER_UPLOAD})` });
     }
 
-    for (const entry of entries) {
-      try {
-        const buffer = entry.getData();
-        const fileHash = createHash('md5').update(buffer).digest('hex');
-        const meta = await sharp(buffer).metadata();
-        const ext = path.extname(entry.entryName).toLowerCase() || '.jpg';
-        const filename = `${nanoid()}${ext}`;
-        fs.writeFileSync(path.join(destDir, filename), buffer);
-        const id = nanoid();
-        insert.run(id, req.params.projectId, filename, path.basename(entry.entryName), meta.width || 0, meta.height || 0, uploaderId, fileHash);
-        created.push(db.prepare('SELECT * FROM images WHERE id = ?').get(id));
-      } catch {
-        skipped++;
-      }
+    // 1. Process entries in parallel
+    const processedEntries = await Promise.all(
+      entries.map(async (entry) => {
+        try {
+          const buffer = entry.getData();
+          const fileHash = createHash('md5').update(buffer).digest('hex');
+
+          if (checkDuplicate) {
+            const existing = db.prepare('SELECT 1 FROM images WHERE project_id = ? AND file_hash = ? LIMIT 1')
+              .get(req.params.projectId, fileHash);
+            if (existing) {
+              return { type: 'duplicate' };
+            }
+          }
+
+          const meta = await sharp(buffer).metadata();
+          const ext = path.extname(entry.entryName).toLowerCase() || '.jpg';
+          const filename = `${nanoid()}${ext}`;
+          
+          fs.writeFileSync(path.join(destDir, filename), buffer);
+
+          return {
+            type: 'valid',
+            item: {
+              id: nanoid(),
+              projectId: req.params.projectId,
+              filename,
+              originalname: path.basename(entry.entryName),
+              width: meta.width || 0,
+              height: meta.height || 0,
+              uploaderId,
+              fileHash,
+            }
+          };
+        } catch (err) {
+          return { type: 'error' };
+        }
+      })
+    );
+
+    const validItems = [];
+    for (const r of processedEntries) {
+      if (r.type === 'valid') validItems.push(r.item);
+      else if (r.type === 'duplicate') duplicated++;
+      else if (r.type === 'error') skipped++;
+    }
+
+    const created = [];
+    if (validItems.length > 0) {
+      const insert = db.prepare(`
+        INSERT INTO images (id, project_id, filename, original_name, width, height, uploaded_by, file_hash)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      // 2. Perform all database insertions in a single transaction
+      const insertTx = db.transaction((items) => {
+        for (const item of items) {
+          insert.run(
+            item.id,
+            item.projectId,
+            item.filename,
+            item.originalname,
+            item.width,
+            item.height,
+            item.uploaderId,
+            item.fileHash
+          );
+        }
+      });
+
+      insertTx(validItems);
+
+      // 3. Batch query the inserted items back
+      const placeholders = validItems.map(() => '?').join(',');
+      const inserted = db.prepare(`SELECT * FROM images WHERE id IN (${placeholders})`)
+        .all(...validItems.map((item) => item.id));
+      created.push(...inserted);
+    }
+
+    if (created.length > 0) {
+      logActivity(req.params.projectId, req.user?.id ?? null, 'image_upload', {
+        count: created.length,
+        names: [req.file.originalname],
+        source: 'zip',
+      });
+    }
+
+    if (checkDuplicate) {
+      res.status(201).json({ created, skipped, duplicated });
+    } else {
+      res.status(201).json({ created, skipped });
     }
   } catch (e) {
     return res.status(400).json({ error: 'Không đọc được file zip: ' + e.message });
   } finally {
     fs.unlink(req.file.path, () => {});
   }
-
-  if (created.length > 0) {
-    logActivity(req.params.projectId, req.user?.id ?? null, 'image_upload', {
-      count: created.length,
-      names: [req.file.originalname],
-      source: 'zip',
-    });
-  }
-
-  res.status(201).json({ created, skipped });
 });
 
 router.patch('/batch', (req, res) => {

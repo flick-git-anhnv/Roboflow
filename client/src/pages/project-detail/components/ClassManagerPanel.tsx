@@ -6,6 +6,8 @@ interface ClassManagerPanelProps {
   onAddClass: () => void;
   onUpdateClass: (cls: ClassLabel, patch: Partial<ClassLabel>) => void;
   onRemoveClass: (cls: ClassLabel) => void;
+  onImportClasses: () => void;
+  onRemoveAllClasses: () => void;
 }
 
 export const ClassManagerPanel: React.FC<ClassManagerPanelProps> = ({
@@ -13,6 +15,8 @@ export const ClassManagerPanel: React.FC<ClassManagerPanelProps> = ({
   onAddClass,
   onUpdateClass,
   onRemoveClass,
+  onImportClasses,
+  onRemoveAllClasses,
 }) => {
   return (
     <div>
@@ -26,6 +30,7 @@ export const ClassManagerPanel: React.FC<ClassManagerPanelProps> = ({
             <input type="text" className="hotkey-input" maxLength={2} placeholder="—"
               defaultValue={cls.hotkey || ''}
               title="Phím tắt để chọn nhanh nhãn này (VD: a, 1, cd, 2b). Tối đa 2 ký tự."
+              onFocus={(e) => e.target.select()}
               onBlur={(e) => {
                 const v = e.target.value.trim();
                 if (v !== (cls.hotkey || '')) {
@@ -41,7 +46,36 @@ export const ClassManagerPanel: React.FC<ClassManagerPanelProps> = ({
           </div>
         ))}
       </div>
-      <button className="btn btn-outline" style={{ width: '100%', marginTop: 8 }} onClick={onAddClass}>+ Thêm nhãn</button>
+      <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+        <button className="btn btn-outline" style={{ flex: 1, padding: '6px 2px', fontSize: 13 }} onClick={onAddClass}>+ Thêm nhãn</button>
+        <button className="btn btn-outline" style={{ flex: 1, padding: '6px 2px', fontSize: 13 }} onClick={onImportClasses}>Import / Copy</button>
+      </div>
+      {classes.length > 0 && (
+        <button 
+          className="btn btn-outline" 
+          onClick={onRemoveAllClasses}
+          style={{ 
+            width: '100%', 
+            marginTop: 6, 
+            padding: '6px 2px', 
+            fontSize: 13, 
+            color: '#c0392b', 
+            borderColor: '#f5c6cb',
+            backgroundColor: '#fff5f5',
+            transition: 'all 0.2s ease',
+          }}
+          onMouseOver={(e) => {
+            e.currentTarget.style.backgroundColor = '#fdf2f2';
+            e.currentTarget.style.color = '#e74c3c';
+          }}
+          onMouseOut={(e) => {
+            e.currentTarget.style.backgroundColor = '#fff5f5';
+            e.currentTarget.style.color = '#c0392b';
+          }}
+        >
+          ✕ Xoá tất cả nhãn
+        </button>
+      )}
     </div>
   );
 };

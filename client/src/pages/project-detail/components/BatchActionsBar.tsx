@@ -22,38 +22,72 @@ export const BatchActionsBar: React.FC<BatchActionsBarProps> = ({
 
   return (
     <div style={{
-      display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-      padding: '8px 12px', marginBottom: 8, borderRadius: 6,
-      background: '#251C53', color: '#fff', fontSize: 13,
+      display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+      padding: '10px 16px', marginBottom: 12, borderRadius: 8,
+      background: '#251C53', color: '#fff', fontSize: 14,
+      boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
     }}>
-      <span style={{ fontWeight: 600 }}>Đã chọn {selectedIds.size} ảnh</span>
+      <span style={{ fontWeight: 600, marginRight: 8 }}>Đã chọn {selectedIds.size} ảnh</span>
       <button
-        className="btn btn-outline"
-        style={{ color: '#fff', borderColor: '#B8B3D6', fontSize: 12 }}
+        className="btn"
+        style={{
+          background: 'rgba(255, 255, 255, 0.12)',
+          color: '#fff',
+          border: '1px solid rgba(255, 255, 255, 0.3)',
+          padding: '6px 12px',
+          fontSize: 13,
+          height: 34,
+        }}
         onClick={() => onSelectPage(pagedImages)}
       >
         Chọn trang này
       </button>
       <select
-        style={{ fontSize: 12, padding: '2px 6px', background: '#4A3F8C', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}
+        style={{
+          fontSize: 13,
+          padding: '0 10px',
+          background: 'rgba(255, 255, 255, 0.12)',
+          color: '#fff',
+          border: '1px solid rgba(255, 255, 255, 0.3)',
+          borderRadius: 8,
+          cursor: 'pointer',
+          minWidth: 130,
+          height: 34,
+          outline: 'none',
+        }}
         value=""
         onChange={(e) => { if (e.target.value) onBatchChangeSplit(e.target.value as Split); e.target.value = ''; }}
       >
-        <option value="">Đổi split…</option>
-        <option value="train">→ train</option>
-        <option value="valid">→ valid</option>
-        <option value="test">→ test</option>
+        <option value="" style={{ background: '#251C53', color: '#fff' }}>Đổi split…</option>
+        <option value="train" style={{ background: '#251C53', color: '#fff' }}>→ train</option>
+        <option value="valid" style={{ background: '#251C53', color: '#fff' }}>→ valid</option>
+        <option value="test" style={{ background: '#251C53', color: '#fff' }}>→ test</option>
       </select>
       <button
         className="btn"
-        style={{ background: '#F05922', color: '#fff', fontSize: 12 }}
+        style={{
+          background: '#F05922',
+          color: '#fff',
+          padding: '6px 12px',
+          fontSize: 13,
+          height: 34,
+          border: 'none',
+        }}
         onClick={onBatchDelete}
       >
         🗑 Xoá {selectedIds.size} ảnh
       </button>
       <button
-        className="btn btn-outline"
-        style={{ color: '#fff', borderColor: '#B8B3D6', fontSize: 12, marginLeft: 'auto' }}
+        className="btn"
+        style={{
+          background: 'rgba(255, 255, 255, 0.12)',
+          color: '#fff',
+          border: '1px solid rgba(255, 255, 255, 0.3)',
+          padding: '6px 12px',
+          fontSize: 13,
+          height: 34,
+          marginLeft: 'auto',
+        }}
         onClick={onClearSelection}
       >
         Bỏ chọn

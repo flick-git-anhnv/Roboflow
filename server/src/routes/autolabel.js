@@ -80,10 +80,15 @@ function getJobFromDB(id) {
   };
 }
 
-// ─── Helper: chọn ảnh cần inference ─────────────────────────────────────────
+function pickTargetImages(projectId, scope, overwrite, imageIds = null) {
+  let all;
+  if (scope === 'selected' && Array.isArray(imageIds) && imageIds.length > 0) {
+    const placeholders = imageIds.map(() => '?').join(',');
+    all = db.prepare(`SELECT * FROM images WHERE project_id = ? AND id IN (${placeholders})`).all(projectId, ...imageIds);
+  } else {
+    all = db.prepare('SELECT * FROM images WHERE project_id = ?').all(projectId);
+  }
 
-function pickTargetImages(projectId, scope, overwrite) {
-  const all = db.prepare('SELECT * FROM images WHERE project_id = ?').all(projectId);
   if (scope === 'unlabeled') return all.filter((i) => i.status !== 'labeled');
   if (overwrite) return all;
   return all.filter((i) => i.status !== 'labeled');
@@ -92,7 +97,8 @@ function pickTargetImages(projectId, scope, overwrite) {
 // ─── Helper: map tên class model → class_id trong project ────────────────────
 
 function buildClassMapping(projectId, modelClassNames, cache) {
-  if (cache.map) return cache.map;
+  if (cache.map && cache.map.length > 0) return cache.map;
+  if (!modelClassNames || modelClassNames.length === 0) return [];
   const existing = db.prepare('SELECT * FROM classes WHERE project_id = ?').all(projectId);
   const byName = new Map(existing.map((c) => [c.name.trim().toLowerCase(), c.id]));
 
@@ -400,11 +406,11 @@ router.post('/', async (req, res) => {
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId);
     if (!project) return res.status(404).json({ error: 'Không tìm thấy project' });
 
-    const { model_id, confidence, scope, overwrite } = req.body;
+    const { model_id, confidence, scope, overwrite, image_ids } = req.body;
     const model = db.prepare('SELECT * FROM models WHERE id = ? AND project_id = ?').get(model_id, projectId);
     if (!model) return res.status(400).json({ error: 'Không tìm thấy model đã chọn' });
 
-    const targets = pickTargetImages(projectId, scope === 'unlabeled' ? 'unlabeled' : 'all', !!overwrite);
+    const targets = pickTargetImages(projectId, scope, !!overwrite, image_ids);
     if (!targets.length) {
       return res.status(400).json({
         error: 'Không có ảnh nào phù hợp để gán nhãn tự động (kiểm tra lại phạm vi/ghi đè)',

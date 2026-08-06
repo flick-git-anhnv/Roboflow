@@ -60,6 +60,8 @@ describe('Project Detail Components', () => {
         onAddClass={onAdd}
         onUpdateClass={onUpdate}
         onRemoveClass={onRemove}
+        onImportClasses={vi.fn()}
+        onRemoveAllClasses={vi.fn()}
       />
     );
 

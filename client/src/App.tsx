@@ -139,14 +139,20 @@ function AppShell() {
             <ThemeToggleBtn />
 
             {user && (
-              <div className="sidemenu-user">
-                <div className="user-info">
-                  <span className="user-dot" style={{ background: user.color || '#4A3F8C' }} />
-                  <span className="user-name" title={user.display_name}>{user.display_name}</span>
-                  <span className="user-role">{user.role}</span>
+              <div className="sidemenu-user-profile">
+                <div className="user-profile-header">
+                  <div className="user-avatar" style={{ background: user.color || '#4A3F8C' }}>
+                    {user.display_name ? user.display_name.charAt(0).toUpperCase() : user.username.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="user-details">
+                    <span className="user-display-name" title={user.display_name}>{user.display_name}</span>
+                    <span className="user-username">@{user.username}</span>
+                    <span className={`user-role-badge role-${user.role}`}>{user.role}</span>
+                  </div>
                 </div>
-                <button onClick={handleLogout} className="btn-sidemenu-logout" title="Đăng xuất">
-                  <LogOut size={16} />
+                <button onClick={handleLogout} className="btn-sidemenu-logout-full">
+                  <LogOut size={14} />
+                  <span>Đăng xuất</span>
                 </button>
               </div>
             )}

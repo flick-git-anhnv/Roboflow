@@ -2,21 +2,25 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import type { AutoLabelJob, ModelInfo } from '../types';
 
-type Scope = 'all' | 'unlabeled';
+type Scope = 'all' | 'unlabeled' | 'selected';
 
 export default function AutoLabelModal({
   projectId,
+  selectedImageIds,
   onClose,
   onFinished,
 }: {
   projectId: string;
+  selectedImageIds?: Set<string>;
   onClose: () => void;
   onFinished: () => void;
 }) {
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [modelId, setModelId] = useState<string>('');
   const [confidence, setConfidence] = useState(0.25);
-  const [scope, setScope] = useState<Scope>('unlabeled');
+  const [scope, setScope] = useState<Scope>(
+    selectedImageIds && selectedImageIds.size > 0 ? 'selected' : 'unlabeled'
+  );
   const [overwrite, setOverwrite] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
@@ -58,7 +62,13 @@ export default function AutoLabelModal({
     if (!modelId) { setError('Vui lòng chọn hoặc tải lên một model .pt'); return; }
     setError('');
     try {
-      const { jobId } = await api.startAutoLabel(projectId, { model_id: modelId, confidence, scope, overwrite });
+      const { jobId } = await api.startAutoLabel(projectId, {
+        model_id: modelId,
+        confidence,
+        scope,
+        overwrite,
+        image_ids: scope === 'selected' && selectedImageIds ? Array.from(selectedImageIds) : undefined,
+      });
       setJob({ status: 'running', total: 0, done: 0, created: 0, failed: 0, error: null, unmatchedClasses: [] });
       pollRef.current = setInterval(async () => {
         const j = await api.getAutoLabelJob(projectId, jobId);
@@ -118,6 +128,12 @@ export default function AutoLabelModal({
             <div className="field">
               <label>Phạm vi áp dụng</label>
               <div className="split-mode-options">
+                {selectedImageIds && selectedImageIds.size > 0 && (
+                  <label className={`split-mode-option ${scope === 'selected' ? 'active' : ''}`}>
+                    <input type="radio" checked={scope === 'selected'} onChange={() => setScope('selected')} />
+                    Chỉ {selectedImageIds.size} ảnh đã chọn
+                  </label>
+                )}
                 <label className={`split-mode-option ${scope === 'unlabeled' ? 'active' : ''}`}>
                   <input type="radio" checked={scope === 'unlabeled'} onChange={() => setScope('unlabeled')} />
                   Chỉ ảnh chưa gán nhãn
@@ -129,7 +145,7 @@ export default function AutoLabelModal({
               </div>
             </div>
 
-            {scope === 'all' && (
+            {(scope === 'all' || scope === 'selected') && (
               <label className="overwrite-check">
                 <input type="checkbox" checked={overwrite} onChange={(e) => setOverwrite(e.target.checked)} />
                 Ghi đè nhãn đã có sẵn (nếu bỏ chọn, ảnh đã gán nhãn sẽ được giữ nguyên)

@@ -10,6 +10,7 @@ import AssignmentModal from '../../components/AssignmentModal';
 
 import ProjectDetailHeader from './components/ProjectDetailHeader';
 import ClassManagerPanel from './components/ClassManagerPanel';
+import ClassImportModal from './components/ClassImportModal';
 import ModelManagerPanel from './components/ModelManagerPanel';
 import UploadDropzone from './components/UploadDropzone';
 import ImageFilterBar from './components/ImageFilterBar';
@@ -36,6 +37,7 @@ export default function ProjectDetailPage() {
   const [autoLabelOpen, setAutoLabelOpen] = useState(false);
   const [validateOpen, setValidateOpen] = useState(false);
   const [assignmentOpen, setAssignmentOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [gridSize, setGridSize] = useState<'small' | 'medium' | 'large'>(() => {
     try {
       const saved = localStorage.getItem('project_grid_size');
@@ -59,6 +61,7 @@ export default function ProjectDetailPage() {
   const {
     project,
     classes,
+    setClasses,
     images,
     setImages,
     models,
@@ -66,6 +69,7 @@ export default function ProjectDetailPage() {
     addClass,
     updateClass,
     removeClass,
+    removeAllClasses,
     removeImage,
     changeSplit,
   } = useProjectDetailData(projectId);
@@ -108,15 +112,18 @@ export default function ProjectDetailPage() {
     batchDelete,
   } = useBatchSelection(projectId, setImages, load, showToast);
 
+  const [checkDuplicates, setCheckDuplicates] = useState(false);
+
   const {
     dragOver,
     setDragOver,
     uploading,
+    uploadProgress,
     fileInputRef,
     folderInputRef,
     zipInputRef,
     handleFiles,
-  } = useFileUpload(projectId, load, showToast);
+  } = useFileUpload(projectId, load, showToast, checkDuplicates);
 
   // Close multiselect dropdown on click outside
   useEffect(() => {
@@ -156,6 +163,8 @@ export default function ProjectDetailPage() {
             onAddClass={addClass}
             onUpdateClass={updateClass}
             onRemoveClass={(cls) => removeClass(cls, (id) => setClassFilter((prev) => prev.filter((cId) => cId !== id)))}
+            onImportClasses={() => setImportOpen(true)}
+            onRemoveAllClasses={removeAllClasses}
           />
 
           <div>
@@ -178,9 +187,22 @@ export default function ProjectDetailPage() {
         </div>
 
         <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, padding: '0 4px' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', fontWeight: 500, userSelect: 'none' }}>
+              <input
+                type="checkbox"
+                checked={checkDuplicates}
+                onChange={(e) => setCheckDuplicates(e.target.checked)}
+                style={{ width: 16, height: 16, cursor: 'pointer' }}
+              />
+              <span>Kiểm tra trùng lặp ảnh (MD5)</span>
+            </label>
+          </div>
+
           <UploadDropzone
             dragOver={dragOver}
             uploading={uploading}
+            uploadProgress={uploadProgress}
             fileInputRef={fileInputRef}
             setDragOver={setDragOver}
             onHandleFiles={handleFiles}
@@ -250,8 +272,19 @@ export default function ProjectDetailPage() {
       {autoLabelOpen && project && (
         <AutoLabelModal
           projectId={project.id}
+          selectedImageIds={selectedIds}
           onClose={() => setAutoLabelOpen(false)}
           onFinished={() => { load(); showToast('Đã gán nhãn tự động xong, hãy kiểm tra lại từng ảnh'); }}
+        />
+      )}
+      {importOpen && project && (
+        <ClassImportModal
+          projectId={project.id}
+          onClose={() => setImportOpen(false)}
+          onSuccess={(updatedClasses) => {
+            setClasses(updatedClasses);
+            showToast('Nhập danh sách nhãn thành công!');
+          }}
         />
       )}
 

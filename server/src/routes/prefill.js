@@ -72,6 +72,19 @@ function buildSuggestions(projectId, classes, boxes, conf) {
       const className = classes[b.class_index] ?? '';
       const class_id  = byName.get(String(className).trim().toLowerCase());
       if (!class_id) return null; // class name không khớp với project classes → bỏ qua
+
+      if (b.type === 'quad' && Array.isArray(b.points) && b.points.length === 4) {
+        const xs = b.points.map((p) => p.x), ys = b.points.map((p) => p.y);
+        const x = Math.min(...xs), y = Math.min(...ys);
+        return {
+          class_id,
+          type: 'quad',
+          x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y,
+          conf: b.conf ?? 1,
+          points: b.points,
+        };
+      }
+
       return {
         class_id,
         x: b.x, y: b.y, w: b.w, h: b.h,

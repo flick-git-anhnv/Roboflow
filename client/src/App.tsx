@@ -102,77 +102,84 @@ function AppShell() {
     });
   }
 
+  const isAnnotator = location.pathname.includes('/annotate/');
+
   return (
-    <div className="app-shell">
-      <header className="topbar">
-        <div className="topbar-left">
-          <Link to="/" className="brand">
+    <div className={`app-shell ${isAnnotator ? 'annotator-mode' : 'has-sidebar'}`}>
+      {!isAnnotator && (
+        <aside className={`sidemenu ${mobileMenuOpen ? 'mobile-open' : ''}`}>
+          <div className="sidemenu-brand">
             <Logo size={28} />
-            <span>KZTEK Labeling Studio</span>
-          </Link>
-          <span className="topbar-subtitle">Công cụ gán nhãn ảnh nội bộ</span>
-        </div>
+            <div className="brand-text">
+              <span className="brand-title">KZTEK</span>
+              <span className="brand-subtitle">Labeling Studio</span>
+            </div>
+          </div>
 
-        <button
-          className="mobile-menu-toggle"
-          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          aria-label="Toggle navigation menu"
-        >
-          {mobileMenuOpen ? <X size={22} /> : <Menu size={22} />}
-        </button>
-
-        <div className={`topbar-right ${mobileMenuOpen ? 'mobile-open' : ''}`}>
-          <nav className="topbar-nav">
-            <NavLink to="/" end className={({ isActive }) => `topbar-link ${isActive ? 'active' : ''}`}>
-              <FolderKanban size={16} />
+          <nav className="sidemenu-nav">
+            <NavLink to="/" end className={({ isActive }) => `sidemenu-link ${isActive ? 'active' : ''}`}>
+              <FolderKanban size={18} />
               <span>Dự án</span>
             </NavLink>
 
-            <NavLink to="/dashboard" className={({ isActive }) => `topbar-link ${isActive ? 'active' : ''}`}>
-              <LayoutDashboard size={16} />
+            <NavLink to="/dashboard" className={({ isActive }) => `sidemenu-link ${isActive ? 'active' : ''}`}>
+              <LayoutDashboard size={18} />
               <span>Dashboard</span>
             </NavLink>
 
             {user && user.role === 'admin' && (
-              <NavLink to="/users" className={({ isActive }) => `topbar-link ${isActive ? 'active' : ''}`}>
-                <Users size={16} />
+              <NavLink to="/users" className={({ isActive }) => `sidemenu-link ${isActive ? 'active' : ''}`}>
+                <Users size={18} />
                 <span>Quản lý tài khoản</span>
               </NavLink>
             )}
           </nav>
 
-          <ThemeToggleBtn />
+          <div className="sidemenu-footer">
+            <ThemeToggleBtn />
 
-          {user && (
-            <>
-              <span className="user-badge">
-                <span
-                  className="user-badge-color"
-                  style={{ background: user.color || '#4A3F8C' }}
-                />
-                <UserIcon size={14} className="user-badge-icon" />
-                <span className="user-badge-name">{user.display_name}</span>
-                <span className="user-badge-role">({user.role})</span>
-              </span>
-              <button onClick={handleLogout} className="btn-logout" title="Đăng xuất">
-                <LogOut size={15} />
-                <span>Đăng xuất</span>
-              </button>
-            </>
-          )}
-        </div>
-      </header>
-      <main className="app-main">
-        <Suspense fallback={<PageFallback />}>
-          <Routes>
-            <Route path="/" element={<ProjectsPage />} />
-            <Route path="/dashboard" element={<DashboardPage />} />
-            <Route path="/users" element={<UsersPage />} />
-            <Route path="/projects/:projectId" element={<ProjectDetailPage />} />
-            <Route path="/projects/:projectId/annotate/:imageId" element={<AnnotatorPage />} />
-          </Routes>
-        </Suspense>
-      </main>
+            {user && (
+              <div className="sidemenu-user">
+                <div className="user-info">
+                  <span className="user-dot" style={{ background: user.color || '#4A3F8C' }} />
+                  <span className="user-name" title={user.display_name}>{user.display_name}</span>
+                  <span className="user-role">{user.role}</span>
+                </div>
+                <button onClick={handleLogout} className="btn-sidemenu-logout" title="Đăng xuất">
+                  <LogOut size={16} />
+                </button>
+              </div>
+            )}
+          </div>
+        </aside>
+      )}
+
+      <div className="app-content-wrapper">
+        {!isAnnotator && (
+          <header className="topbar-minimal">
+            <button
+              className="mobile-menu-toggle"
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              aria-label="Toggle navigation menu"
+              style={{ display: 'none' }} /* controlled via CSS media queries */
+            >
+              {mobileMenuOpen ? <X size={22} /> : <Menu size={22} />}
+            </button>
+            <span className="topbar-subtitle">Công cụ gán nhãn ảnh nội bộ v2.0</span>
+          </header>
+        )}
+        <main className="app-main">
+          <Suspense fallback={<PageFallback />}>
+            <Routes>
+              <Route path="/" element={<ProjectsPage />} />
+              <Route path="/dashboard" element={<DashboardPage />} />
+              <Route path="/users" element={<UsersPage />} />
+              <Route path="/projects/:projectId" element={<ProjectDetailPage />} />
+              <Route path="/projects/:projectId/annotate/:imageId" element={<AnnotatorPage />} />
+            </Routes>
+          </Suspense>
+        </main>
+      </div>
     </div>
   );
 }

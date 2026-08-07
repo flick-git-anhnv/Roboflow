@@ -43,12 +43,17 @@ router.put('/', (req, res) => {
   const tx = db.transaction(() => {
     db.prepare('DELETE FROM annotations WHERE image_id = ?').run(imageId);
     const insert = db.prepare(`
-      INSERT INTO annotations (id, image_id, class_id, x, y, w, h, type, points) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO annotations (id, image_id, class_id, x, y, w, h, type, points, text_content) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const b of boxes) {
-      const type = b.type === 'quad' ? 'quad' : 'bbox';
+      const type = ['quad', 'classify', 'text_rec'].includes(b.type) ? b.type : 'bbox';
       const points = type === 'quad' && Array.isArray(b.points) ? JSON.stringify(b.points) : null;
-      insert.run(nanoid(), imageId, b.class_id, b.x, b.y, b.w, b.h, type, points);
+      const text_content = b.text_content || null;
+      const x = b.x ?? 0;
+      const y = b.y ?? 0;
+      const w = b.w ?? 0;
+      const h = b.h ?? 0;
+      insert.run(nanoid(), imageId, b.class_id, x, y, w, h, type, points, text_content);
     }
     db.prepare("UPDATE images SET status = ? WHERE id = ?")
       .run(boxes.length > 0 ? 'labeled' : 'unlabeled', imageId);

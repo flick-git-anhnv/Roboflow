@@ -3,6 +3,7 @@ import { api } from '../api';
 import type { AutoLabelJob, ModelInfo } from '../types';
 
 type Scope = 'all' | 'unlabeled' | 'selected';
+type ModelMode = 'both' | 'box_only' | 'class_only' | 'text_recognize';
 
 export default function AutoLabelModal({
   projectId,
@@ -36,6 +37,13 @@ export default function AutoLabelModal({
       return false;
     }
   });
+  const [modelMode, setModelMode] = useState<ModelMode>(() => {
+    try {
+      const saved = localStorage.getItem('autolabel_model_mode');
+      if (saved === 'both' || saved === 'box_only' || saved === 'class_only' || saved === 'text_recognize') return saved;
+    } catch {}
+    return 'both';
+  });
 
   const handleConfidenceChange = (val: number) => {
     setConfidence(val);
@@ -48,6 +56,13 @@ export default function AutoLabelModal({
     setOverwrite(val);
     try {
       localStorage.setItem('autolabel_overwrite', String(val));
+    } catch {}
+  };
+
+  const handleModelModeChange = (val: ModelMode) => {
+    setModelMode(val);
+    try {
+      localStorage.setItem('autolabel_model_mode', val);
     } catch {}
   };
 
@@ -88,7 +103,7 @@ export default function AutoLabelModal({
   };
 
   const runAutoLabel = async () => {
-    if (!modelId) { setError('Vui lòng chọn hoặc tải lên một model .pt'); return; }
+    if (!modelId) { setError('Vui lòng chọn hoặc tải lên một model .pt hoặc .onnx'); return; }
     setError('');
     try {
       const { jobId } = await api.startAutoLabel(projectId, {
@@ -97,6 +112,7 @@ export default function AutoLabelModal({
         scope,
         overwrite,
         image_ids: scope === 'selected' && selectedImageIds ? Array.from(selectedImageIds) : undefined,
+        model_mode: modelMode,
       });
       setJob({ status: 'running', total: 0, done: 0, created: 0, failed: 0, error: null, unmatchedClasses: [] });
       pollRef.current = setInterval(async () => {
@@ -122,7 +138,7 @@ export default function AutoLabelModal({
         {!job && (
           <>
             <div className="field">
-              <label>Model YOLO (.pt)</label>
+              <label>Model YOLO (.pt, .onnx)</label>
               <div className="model-picker">
                 <select value={modelId} onChange={(e) => setModelId(e.target.value)}>
                   <option value="">— Chọn model đã tải lên —</option>
@@ -133,7 +149,7 @@ export default function AutoLabelModal({
                 <button className="btn btn-outline" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
                   {uploading ? 'Đang tải...' : '+ Tải model mới'}
                 </button>
-                <input ref={fileInputRef} type="file" accept=".pt" hidden
+                 <input ref={fileInputRef} type="file" accept=".pt,.onnx" hidden
                   onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(f); e.target.value = ''; }} />
               </div>
               {models.length > 0 && (
@@ -146,6 +162,28 @@ export default function AutoLabelModal({
                   ))}
                 </div>
               )}
+            </div>
+
+             <div className="field">
+              <label>Chức năng của model</label>
+              <div className="split-mode-options">
+                <label className={`split-mode-option ${modelMode === 'both' ? 'active' : ''}`}>
+                  <input type="radio" checked={modelMode === 'both'} onChange={() => handleModelModeChange('both')} />
+                  Cả Box & Class (Mặc định)
+                </label>
+                <label className={`split-mode-option ${modelMode === 'box_only' ? 'active' : ''}`}>
+                  <input type="radio" checked={modelMode === 'box_only'} onChange={() => handleModelModeChange('box_only')} />
+                  Chỉ detect Box
+                </label>
+                <label className={`split-mode-option ${modelMode === 'class_only' ? 'active' : ''}`}>
+                  <input type="radio" checked={modelMode === 'class_only'} onChange={() => handleModelModeChange('class_only')} />
+                  Chỉ detect Class
+                </label>
+                <label className={`split-mode-option ${modelMode === 'text_recognize' ? 'active' : ''}`}>
+                  <input type="radio" checked={modelMode === 'text_recognize'} onChange={() => handleModelModeChange('text_recognize')} />
+                  Nhận diện Text (Text Recognize)
+                </label>
+              </div>
             </div>
 
              <div className="field">
@@ -174,7 +212,7 @@ export default function AutoLabelModal({
               </div>
             </div>
 
-            {(scope === 'all' || scope === 'selected') && (
+            {(scope === 'all' || scope === 'selected' || modelMode === 'class_only' || modelMode === 'text_recognize') && (
               <label className="overwrite-check">
                 <input type="checkbox" checked={overwrite} onChange={(e) => handleOverwriteChange(e.target.checked)} />
                 Ghi đè nhãn đã có sẵn (nếu bỏ chọn, ảnh đã gán nhãn sẽ được giữ nguyên)

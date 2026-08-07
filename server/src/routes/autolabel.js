@@ -108,11 +108,182 @@ function buildClassMapping(projectId, modelClassNames, cache) {
   return map;
 }
 
+function getIoU(box1, box2) {
+  const x1 = Math.max(box1.x, box2.x);
+  const y1 = Math.max(box1.y, box2.y);
+  const x2 = Math.min(box1.x + box1.w, box2.x + box2.w);
+  const y2 = Math.min(box1.y + box1.h, box2.y + box2.h);
+  
+  const intersection = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+  if (intersection === 0) return 0;
+  
+  const union = (box1.w * box1.h) + (box2.w * box2.h) - intersection;
+  return intersection / union;
+}
+
+function getCenterDistance(box1, box2) {
+  const cx1 = box1.x + box1.w / 2;
+  const cy1 = box1.y + box1.h / 2;
+  const cx2 = box2.x + box2.w / 2;
+  const cy2 = box2.y + box2.h / 2;
+  return Math.sqrt(Math.pow(cx1 - cx2, 2) + Math.pow(cy1 - cy2, 2));
+}
+
+function matchDetectionsToAnnotations(annots, detections, classIdMap) {
+  const matches = new Map(); // annotId -> classId
+  if (!annots.length || !detections.length) return matches;
+
+  // Scenario 1: Exact matching counts (e.g. License Plates characters) -> Sort by X coordinate
+  if (annots.length === detections.length) {
+    const sortedAnnots = [...annots].sort((a, b) => a.x - b.x);
+    const sortedDetections = [...detections].sort((a, b) => a.x - b.x);
+    for (let i = 0; i < sortedAnnots.length; i++) {
+      const classId = classIdMap[sortedDetections[i].class_index];
+      if (classId) matches.set(sortedAnnots[i].id, classId);
+    }
+    return matches;
+  }
+
+  // Scenario 2: Standard spatial matching (IoU + distance fallback) - Loop through detections to pair with best annotation
+  const matchedAnnotIds = new Set();
+  
+  for (const det of detections) {
+    let bestAnnot = null;
+    let bestIoU = 0;
+    
+    // 1. Try IoU matching first among unmatched annotations
+    for (const annot of annots) {
+      if (matchedAnnotIds.has(annot.id)) continue;
+      const iou = getIoU(annot, det);
+      if (iou > bestIoU && iou > 0.1) {
+        bestIoU = iou;
+        bestAnnot = annot;
+      }
+    }
+
+    // 2. Distance fallback if IoU is zero
+    if (!bestAnnot) {
+      let minDist = Infinity;
+      for (const annot of annots) {
+        if (matchedAnnotIds.has(annot.id)) continue;
+        const dist = getCenterDistance(annot, det);
+        if (dist < minDist) {
+          minDist = dist;
+          bestAnnot = annot;
+        }
+      }
+    }
+
+    if (bestAnnot) {
+      const classId = classIdMap[det.class_index];
+      if (classId) {
+        matches.set(bestAnnot.id, classId);
+        matchedAnnotIds.add(bestAnnot.id);
+      }
+    }
+  }
+
+  return matches;
+}
+
 // ─── Helper: lưu detections của 1 ảnh vào DB ─────────────────────────────────
 
-function saveDetectionsForImage(imageId, boxes, classIdMap) {
+function saveDetectionsForImage(imageId, boxes, classIdMap, modelMode = 'both', projectId = null, modelClassNames = []) {
+  // 1. TEXT RECOGNIZE MODE: split recognized text string and assign to sorted existing annotations OR save as full text_rec annotation
+  if (modelMode === 'text_recognize') {
+    if (!modelClassNames || modelClassNames.length === 0 || boxes.length === 0) return 0;
+
+    // Get the recognized text from the highest confidence prediction
+    const bestBox = [...boxes].sort((a, b) => (b.conf || 0) - (a.conf || 0))[0];
+    const textString = modelClassNames[bestBox.class_index];
+    if (!textString) return 0;
+
+    const project = projectId ? db.prepare('SELECT label_type FROM projects WHERE id = ?').get(projectId) : null;
+    const labelType = project?.label_type || 'bbox';
+
+    if (labelType === 'text_rec') {
+      // Save the entire text string as a single text_rec annotation
+      let defaultClass = projectId ? db.prepare('SELECT id FROM classes WHERE project_id = ? LIMIT 1').get(projectId) : null;
+      if (!defaultClass && projectId) {
+        const defaultClassId = nanoid();
+        db.prepare('INSERT INTO classes (id, project_id, name, color, sort_order) VALUES (?, ?, ?, ?, ?)')
+          .run(defaultClassId, projectId, 'text', '#F05922', 0);
+        defaultClass = { id: defaultClassId };
+      }
+      const defaultClassId = defaultClass?.id;
+      if (!defaultClassId) return 0;
+
+      let updatedCount = 0;
+      const tx = db.transaction(() => {
+        db.prepare('DELETE FROM annotations WHERE image_id = ?').run(imageId);
+        db.prepare(`
+          INSERT INTO annotations (id, image_id, class_id, x, y, w, h, type, points, text_content)
+          VALUES (?, ?, ?, 0, 0, 0, 0, 'text_rec', null, ?)
+        `).run(nanoid(), imageId, defaultClassId, textString);
+        db.prepare("UPDATE images SET status = 'labeled' WHERE id = ?").run(imageId);
+        updatedCount = 1;
+      });
+      tx();
+      return updatedCount;
+    } else {
+      // Clean and split the text string into characters
+      const cleanText = textString.replace(/[\s\-\.]/g, '');
+      const chars = cleanText.split('');
+
+      // Query existing annotations for this image
+      const existingAnnots = db.prepare('SELECT * FROM annotations WHERE image_id = ?').all(imageId);
+      if (existingAnnots.length === 0 || chars.length === 0) return 0;
+
+      // Sort existing annotations from left to right (by X coordinate)
+      const sortedAnnots = [...existingAnnots].sort((a, b) => a.x - b.x);
+
+      // Get project's classes
+      const existingClasses = db.prepare('SELECT * FROM classes WHERE project_id = ?').all(projectId);
+      const classMap = new Map(existingClasses.map(c => [c.name.trim().toLowerCase(), c.id]));
+
+      // Map each character to project's class ID
+      const classIds = chars.map(char => classMap.get(char.toLowerCase())).filter(Boolean);
+      if (classIds.length === 0) return 0;
+
+      let updatedCount = 0;
+      const tx = db.transaction(() => {
+        const update = db.prepare('UPDATE annotations SET class_id = ? WHERE id = ?');
+        for (let i = 0; i < Math.min(sortedAnnots.length, classIds.length); i++) {
+          update.run(classIds[i], sortedAnnots[i].id);
+          updatedCount++;
+        }
+      });
+      tx();
+
+      return updatedCount;
+    }
+  }
+
+  // 2. CLASS ONLY MODE: update classes of existing annotations
+  if (modelMode === 'class_only') {
+    const existingAnnots = db.prepare('SELECT * FROM annotations WHERE image_id = ?').all(imageId);
+    if (existingAnnots.length === 0 || boxes.length === 0) return 0;
+    
+    const matches = matchDetectionsToAnnotations(existingAnnots, boxes, classIdMap);
+    let updatedCount = 0;
+    
+    const tx = db.transaction(() => {
+      const update = db.prepare('UPDATE annotations SET class_id = ? WHERE id = ?');
+      for (const [annotId, classId] of matches.entries()) {
+        update.run(classId, annotId);
+        updatedCount++;
+      }
+    });
+    tx();
+    
+    return updatedCount;
+  }
+
+  // 2. BOTH / BOX ONLY MODE: insert new boxes
+  const defaultClassId = projectId ? db.prepare('SELECT id FROM classes WHERE project_id = ? LIMIT 1').get(projectId)?.id : null;
+
   const rows = boxes.map((b) => {
-    const classId = classIdMap[b.class_index];
+    const classId = classIdMap[b.class_index] || (modelMode === 'box_only' ? defaultClassId : null);
     if (!classId) return null;
     if (b.type === 'quad' && Array.isArray(b.points) && b.points.length === 4) {
       const xs = b.points.map((p) => p.x), ys = b.points.map((p) => p.y);
@@ -228,7 +399,7 @@ async function checkInferenceHealth() {
  * @param {Array}  images    — [{id, path}]
  * @param {object} job       — in-memory job state
  */
-async function runInferenceHTTP(projectId, modelId, modelPath, conf, images, job) {
+async function runInferenceHTTP(projectId, modelId, modelPath, conf, images, job, modelMode = 'both') {
   const classCache = {};
 
   for (let i = 0; i < images.length; i += INFERENCE_BATCH_SIZE) {
@@ -257,7 +428,7 @@ async function runInferenceHTTP(projectId, modelId, modelPath, conf, images, job
         }
         // Áp threshold ở application layer — cho phép đổi conf mà không detect lại
         const filtered = filterRawBoxesByConf(cached.boxes ?? [], conf);
-        job.created += saveDetectionsForImage(img.id, filtered, classIdMap);
+        job.created += saveDetectionsForImage(img.id, filtered, classIdMap, modelMode, projectId, cached.classes);
         job.done += 1;
         console.log(`[detect_cache] HIT  image=${img.id} model=${modelId}`);
       } catch (err) {
@@ -319,7 +490,7 @@ async function runInferenceHTTP(projectId, modelId, modelPath, conf, images, job
 
           // Áp conf threshold user ở application layer trước khi lưu annotations
           const filtered = filterRawBoxesByConf(result.detections, conf);
-          job.created += saveDetectionsForImage(result.image_id, filtered, classIdMap);
+          job.created += saveDetectionsForImage(result.image_id, filtered, classIdMap, modelMode, projectId, classes);
           job.done += 1;
         }
 
@@ -347,7 +518,7 @@ async function runInferenceHTTP(projectId, modelId, modelPath, conf, images, job
  * Giữ nguyên để rollback — KHÔNG XÓA.
  * Kích hoạt bằng env USE_LEGACY_INFER=1.
  */
-function runInference(projectId, modelPath, conf, images, job) {
+function runInference(projectId, modelPath, conf, images, job, modelMode = 'both') {
   const child = spawn(PYTHON_BIN, [INFER_SCRIPT], { stdio: ['pipe', 'pipe', 'pipe'] });
   const classCache = {};
   let stderrBuf = '';
@@ -373,7 +544,7 @@ function runInference(projectId, modelPath, conf, images, job) {
       if (msg.error) {
         job.failed += 1;
       } else if (Array.isArray(msg.boxes)) {
-        job.created += saveDetectionsForImage(msg.image_id, msg.boxes, classIdMap);
+        job.created += saveDetectionsForImage(msg.image_id, msg.boxes, classIdMap, modelMode, projectId, msg.classes);
       }
       job.done += 1;
     }
@@ -406,7 +577,7 @@ router.post('/', async (req, res) => {
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId);
     if (!project) return res.status(404).json({ error: 'Không tìm thấy project' });
 
-    const { model_id, confidence, scope, overwrite, image_ids } = req.body;
+    const { model_id, confidence, scope, overwrite, image_ids, model_mode = 'both' } = req.body;
     const model = db.prepare('SELECT * FROM models WHERE id = ? AND project_id = ?').get(model_id, projectId);
     if (!model) return res.status(400).json({ error: 'Không tìm thấy model đã chọn' });
 
@@ -451,7 +622,7 @@ router.post('/', async (req, res) => {
       // Legacy mode: runInference dùng event callbacks (không phải Promise).
       // Dùng interval 500ms để phát hiện khi job kết thúc và sync lần cuối vào DB.
       // NOTE: Legacy mode KHÔNG dùng detect_cache (chỉ HTTP mode mới có cache).
-      runInference(projectId, modelPath, conf, images, job);
+      runInference(projectId, modelPath, conf, images, job, model_mode);
       const legacySyncTimer = setInterval(() => {
         if (job.status === 'done' || job.status === 'error') {
           syncJobToDB(jobId, job);
@@ -461,7 +632,7 @@ router.post('/', async (req, res) => {
       }, 500);
     } else {
       // HTTP mode (STEP-4.1): truyền model_id để cache theo (image_id, model_id).
-      runInferenceHTTP(projectId, model_id, modelPath, conf, images, job)
+      runInferenceHTTP(projectId, model_id, modelPath, conf, images, job, model_mode)
         .then(() => {
           syncJobToDB(jobId, job);
           jobs.delete(jobId);

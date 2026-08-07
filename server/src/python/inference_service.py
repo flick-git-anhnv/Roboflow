@@ -79,18 +79,84 @@ class WarmupRequest(BaseModel):
     model_path: str
 
 
-# ─── Helpers ──────────────────────────────────────────────────────────────────
+# ─── Helpers & Custom ONNX OCR ────────────────────────────────────────────────
+
+import numpy as np
+
+I2C = ["<EOS>"] + list("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ") + list("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~")
+
+def preprocess_ocr_image(img_path: str):
+    import cv2
+    img = cv2.imread(img_path)
+    if img is None:
+        raise ValueError(f"Không thể đọc ảnh: {img_path}")
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    img = cv2.resize(img, (224, 224))
+    img = img.astype(np.float32) / 255.0
+    img = np.transpose(img, (2, 0, 1))
+    img = np.expand_dims(img, axis=0)
+    return img
+
+def decode_logits(logits):
+    logits = logits[0] 
+    exp_logits = np.exp(logits - np.max(logits, axis=-1, keepdims=True))
+    probs = exp_logits / np.sum(exp_logits, axis=-1, keepdims=True)
+    
+    max_probs = np.max(probs, axis=-1)
+    best_indices = np.argmax(logits, axis=-1)
+    
+    text = ""
+    confidences = []
+    
+    for idx, prob in zip(best_indices, max_probs):
+        if idx == 0: # <EOS>
+            break
+            
+        char_conf = prob * 100
+        
+        if char_conf < 40.0:
+            continue 
+            
+        if idx < len(I2C):
+            text += I2C[idx]
+        confidences.append(char_conf)
+        
+    mean_conf = np.mean(confidences) if confidences else 0.0
+    
+    high_conf_count = sum(1 for c in confidences if c > 90.0)
+    
+    if high_conf_count < 3 or mean_conf < 70.0:
+        return "", 0.0
+        
+    return text, mean_conf
 
 def _load_model(model_path: str):
-    """Lấy model từ LRU cache hoặc load từ disk và cache lại."""
-    model = _model_cache.get(model_path)
-    if model is not None:
-        return model
+    """Lấy model từ LRU cache hoặc load từ disk và cache lại (hỗ trợ cả YOLO và ONNX OCR)."""
+    model_wrapper = _model_cache.get(model_path)
+    if model_wrapper is not None:
+        return model_wrapper
 
     print(f"[inference_service] Loading model: {model_path}", flush=True)
+    
+    # 1. Check if it's the custom ONNX OCR model
+    if model_path.endswith('.onnx'):
+        try:
+            import onnxruntime as ort
+            session = ort.InferenceSession(model_path)
+            input_names = [i.name for i in session.get_inputs()]
+            if "kienkk-cho-vao" in input_names:
+                model_wrapper = {"type": "onnx_ocr", "session": session}
+                _model_cache.put(model_path, model_wrapper)
+                print(f"[inference_service] Custom ONNX OCR Model cached: {model_path}", flush=True)
+                return model_wrapper
+        except Exception as e:
+            print(f"[inference_service] Failed checking custom ONNX OCR layers: {e}", flush=True)
+
+    # 2. Fallback to YOLO model
     try:
-        from ultralytics import YOLO  # lazy import — không block startup nếu chưa cài
+        from ultralytics import YOLO  # lazy import
         model = YOLO(model_path)
+        model_wrapper = {"type": "yolo", "model": model}
     except ImportError:
         raise HTTPException(
             status_code=503,
@@ -107,9 +173,9 @@ def _load_model(model_path: str):
             detail=f"Không thể load model '{model_path}': {exc}",
         )
 
-    _model_cache.put(model_path, model)
-    print(f"[inference_service] Model cached: {model_path}", flush=True)
-    return model
+    _model_cache.put(model_path, model_wrapper)
+    print(f"[inference_service] YOLO Model cached: {model_path}", flush=True)
+    return model_wrapper
 
 
 def _predict_single(model, img_path: str, conf: float, iou: float) -> list:
@@ -178,31 +244,62 @@ def warmup(req: WarmupRequest):
 def predict(req: PredictRequest):
     """
     Batch inference: nhận danh sách ảnh, trả toàn bộ kết quả trong 1 response.
-    Node chia job lớn thành nhiều request 32 ảnh và tự track progress qua jobs Map.
-
-    Response shape:
-      {
-        "classes": ["class_name_0", ...],   # tên class từ model (theo index)
-        "results": [
-          {
-            "image_id": "nanoid",
-            "detections": [
-              {"class_index": 0, "type": "bbox", "x": ..., "y": ..., "w": ..., "h": ...},
-              {"class_index": 1, "type": "quad", "points": [...]}
-            ]
-          }
-        ],
-        "errors": [
-          {"image_id": "nanoid", "error": "message"}
-        ]
-      }
+    Hỗ trợ cả YOLO và Custom ONNX OCR models.
     """
-    model = _load_model(req.model_path)
-    names = model.names
-    class_list = [names[i] for i in sorted(names.keys())]
-
+    model_wrapper = _load_model(req.model_path)
+    
     results_out = []
     errors_out = []
+    
+    # ── Chạy Custom ONNX OCR Model ──────────────────────────────────────────
+    if model_wrapper["type"] == "onnx_ocr":
+        session = model_wrapper["session"]
+        input_name = session.get_inputs()[0].name
+        output_name = session.get_outputs()[0].name
+        
+        classes = []
+        for img in req.images:
+            try:
+                input_data = preprocess_ocr_image(img.path)
+                outputs = session.run([output_name], {input_name: input_data})
+                logits = outputs[0]
+                text, conf = decode_logits(logits)
+                
+                if text:
+                    classes.append(text)
+                    class_idx = len(classes) - 1
+                    results_out.append({
+                        "image_id": img.id,
+                        "detections": [
+                            {
+                                "class_index": class_idx,
+                                "type": "bbox",
+                                "x": 0.0,
+                                "y": 0.0,
+                                "w": 0.0,
+                                "h": 0.0,
+                                "conf": float(conf / 100.0)
+                            }
+                        ]
+                    })
+                else:
+                    results_out.append({
+                        "image_id": img.id,
+                        "detections": []
+                    })
+            except Exception as exc:
+                errors_out.append({"image_id": img.id, "error": str(exc)})
+                
+        return {
+            "classes": classes,
+            "results": results_out,
+            "errors": errors_out,
+        }
+
+    # ── Chạy YOLO Model ─────────────────────────────────────────────────────
+    model = model_wrapper["model"]
+    names = model.names
+    class_list = [names[i] for i in sorted(names.keys())]
 
     for img in req.images:
         try:

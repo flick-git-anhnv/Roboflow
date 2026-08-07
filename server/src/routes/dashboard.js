@@ -1,40 +1,87 @@
 import { Router } from 'express';
 import { db } from '../db.js';
+import { checkProjectAssignment } from '../middleware/projectAccess.js';
 
 const router = Router({ mergeParams: true });
 
 // ── 1. GET /api/dashboard/overview ─────────────────────────────────────────
 router.get('/overview', (req, res) => {
   try {
-    const totalProjects = db.prepare('SELECT COUNT(*) AS n FROM projects').get().n;
-    const totalImages = db.prepare('SELECT COUNT(*) AS n FROM images').get().n;
-    const totalAnnotations = db.prepare('SELECT COUNT(*) AS n FROM annotations').get().n;
-    const totalUsers = db.prepare('SELECT COUNT(*) AS n FROM users').get().n;
+    const user = req.user;
+    let totalProjects, totalImages, totalAnnotations, totalUsers, completedImages, recentActivity;
 
-    const completedImages = db.prepare(
-      "SELECT COUNT(*) AS n FROM images WHERE completed_at IS NOT NULL OR status = 'labeled'"
-    ).get().n;
+    if (user && (user.role === 'annotator' || user.role === 'label')) {
+      const userId = user.id;
+      totalProjects = db.prepare('SELECT COUNT(*) AS n FROM project_assignments WHERE user_id = ?').get(userId).n;
+      totalImages = db.prepare(`
+        SELECT COUNT(*) AS n FROM images i
+        JOIN project_assignments pa ON pa.project_id = i.project_id
+        WHERE pa.user_id = ?
+      `).get(userId).n;
+      totalAnnotations = db.prepare(`
+        SELECT COUNT(*) AS n FROM annotations a
+        JOIN images i ON i.id = a.image_id
+        JOIN project_assignments pa ON pa.project_id = i.project_id
+        WHERE pa.user_id = ?
+      `).get(userId).n;
+      totalUsers = db.prepare(`
+        SELECT COUNT(DISTINCT user_id) AS n FROM project_assignments
+        WHERE project_id IN (SELECT project_id FROM project_assignments WHERE user_id = ?)
+      `).get(userId).n;
+      completedImages = db.prepare(`
+        SELECT COUNT(*) AS n FROM images i
+        JOIN project_assignments pa ON pa.project_id = i.project_id
+        WHERE pa.user_id = ? AND (i.completed_at IS NOT NULL OR i.status = 'labeled')
+      `).get(userId).n;
+
+      recentActivity = db.prepare(`
+        SELECT a.id, a.project_id, a.actor_id, u.display_name AS actor_name, a.action, a.detail, a.created_at
+        FROM activity_log a
+        JOIN project_assignments pa ON pa.project_id = a.project_id
+        LEFT JOIN users u ON u.id = a.actor_id
+        WHERE pa.user_id = ?
+        ORDER BY a.created_at DESC
+        LIMIT 10
+      `).all(userId).map((r) => {
+        let parsedDetail = null;
+        if (r.detail) {
+          try { parsedDetail = JSON.parse(r.detail); } catch (_) { parsedDetail = r.detail; }
+        }
+        return {
+          ...r,
+          detail: parsedDetail,
+        };
+      });
+    } else {
+      totalProjects = db.prepare('SELECT COUNT(*) AS n FROM projects').get().n;
+      totalImages = db.prepare('SELECT COUNT(*) AS n FROM images').get().n;
+      totalAnnotations = db.prepare('SELECT COUNT(*) AS n FROM annotations').get().n;
+      totalUsers = db.prepare('SELECT COUNT(*) AS n FROM users').get().n;
+      completedImages = db.prepare(
+        "SELECT COUNT(*) AS n FROM images WHERE completed_at IS NOT NULL OR status = 'labeled'"
+      ).get().n;
+
+      recentActivity = db.prepare(`
+        SELECT a.id, a.project_id, a.actor_id, u.display_name AS actor_name, a.action, a.detail, a.created_at
+        FROM activity_log a
+        LEFT JOIN users u ON u.id = a.actor_id
+        ORDER BY a.created_at DESC
+        LIMIT 10
+      `).all().map((r) => {
+        let parsedDetail = null;
+        if (r.detail) {
+          try { parsedDetail = JSON.parse(r.detail); } catch (_) { parsedDetail = r.detail; }
+        }
+        return {
+          ...r,
+          detail: parsedDetail,
+        };
+      });
+    }
 
     const globalCompletionPercent = totalImages > 0
       ? Math.round((completedImages / totalImages) * 1000) / 10
       : 0;
-
-    const recentActivity = db.prepare(`
-      SELECT a.id, a.project_id, a.actor_id, u.display_name AS actor_name, a.action, a.detail, a.created_at
-      FROM activity_log a
-      LEFT JOIN users u ON u.id = a.actor_id
-      ORDER BY a.created_at DESC
-      LIMIT 10
-    `).all().map((r) => {
-      let parsedDetail = null;
-      if (r.detail) {
-        try { parsedDetail = JSON.parse(r.detail); } catch (_) { parsedDetail = r.detail; }
-      }
-      return {
-        ...r,
-        detail: parsedDetail,
-      };
-    });
 
     res.json({
       totalProjects,
@@ -50,7 +97,7 @@ router.get('/overview', (req, res) => {
 });
 
 // ── 2. GET /api/projects/:projectId/dashboard ──────────────────────────────
-router.get('/:projectId/dashboard', (req, res) => {
+router.get('/:projectId/dashboard', checkProjectAssignment, (req, res) => {
   const { projectId } = req.params;
   try {
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId);
@@ -122,7 +169,7 @@ router.get('/:projectId/dashboard', (req, res) => {
 });
 
 // ── 3. GET /api/projects/:projectId/reports/users ──────────────────────────
-router.get('/:projectId/reports/users', (req, res) => {
+router.get('/:projectId/reports/users', checkProjectAssignment, (req, res) => {
   const { projectId } = req.params;
   try {
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId);
@@ -150,7 +197,7 @@ router.get('/:projectId/reports/users', (req, res) => {
 });
 
 // ── 4. GET /api/projects/:projectId/reports/timeline ───────────────────────
-router.get('/:projectId/reports/timeline', (req, res) => {
+router.get('/:projectId/reports/timeline', checkProjectAssignment, (req, res) => {
   const { projectId } = req.params;
   const days = Math.min(365, Math.max(7, parseInt(req.query.days || '30', 10)));
 
@@ -195,7 +242,7 @@ router.get('/:projectId/reports/timeline', (req, res) => {
 });
 
 // ── 5. GET /api/projects/:projectId/reports/export?format=csv|json ─────────
-router.get('/:projectId/reports/export', (req, res) => {
+router.get('/:projectId/reports/export', checkProjectAssignment, (req, res) => {
   const { projectId } = req.params;
   const format = (req.query.format || 'csv').toLowerCase();
 

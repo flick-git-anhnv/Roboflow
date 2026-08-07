@@ -237,6 +237,13 @@ async function runTests() {
   const proj = await createProj.json();
   const PID = proj.id;
 
+  // Assign annotator to project so they can bypass checkProjectAssignment middleware
+  await put(`/api/projects/${PID}/assignments`, {
+    assignments: [
+      { user_id: annotatorId, percent: 100 }
+    ]
+  }, adminToken);
+
   // Upload test image as annotator (for owner-based delete tests)
   const uploadAsAnnotator = await uploadImage(PID, annotatorToken);
   ok('Upload image as annotator', uploadAsAnnotator.status === 201);
@@ -1151,6 +1158,13 @@ async function runTests() {
     if (!V24_PID) {
       skip('Row24: tất cả tests', 'Không tạo được project');
     } else {
+      // Assign annotator to V24_PID so they can access it
+      await put(`/api/projects/${V24_PID}/assignments`, {
+        assignments: [
+          { user_id: annotatorId, percent: 100 }
+        ]
+      }, adminToken);
+
       // 1. Unauthenticated → 401
       const validateUnauth = await get(`/api/projects/${V24_PID}/validate`, null);
       ok('Row24: GET /validate unauthenticated → 401', validateUnauth.status === 401,
@@ -1278,6 +1292,13 @@ async function runTests() {
     if (!A25_PID) {
       skip('Row25: tất cả tests', 'Không tạo được project');
     } else {
+      // Assign annotator to A25_PID so they can access it
+      await put(`/api/projects/${A25_PID}/assignments`, {
+        assignments: [
+          { user_id: annotatorId, percent: 0 }
+        ]
+      }, adminToken);
+
       // Upload 10 ảnh để có tổng số tròn, dễ tính %
       let uploadedOk = true;
       for (let i = 0; i < 10; i++) {

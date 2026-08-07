@@ -146,21 +146,49 @@ router.delete('/:id', requireRole('admin'), (req, res) => {
   const existing = db.prepare('SELECT * FROM users WHERE id = ?').get(targetId);
   if (!existing) return res.status(404).json({ error: 'USER_NOT_FOUND' });
 
-  // Kiểm tra FK trong annotation_history (Phase 3 chưa có bảng này nên fallback hard-delete)
+  // Kiểm tra FK trong các bảng liên quan: annotation_history, images, activity_log
   let hasFk = false;
   try {
-    const fkCheck = db.prepare('SELECT 1 FROM annotation_history WHERE actor_id = ? LIMIT 1').get(targetId);
-    hasFk = !!fkCheck;
-  } catch {
-    hasFk = false; // bảng chưa tồn tại
+    const histCheck = db.prepare('SELECT 1 FROM annotation_history WHERE actor_id = ? LIMIT 1').get(targetId);
+    if (histCheck) hasFk = true;
+
+    if (!hasFk) {
+      const imgCheck = db.prepare(`
+        SELECT 1 FROM images 
+        WHERE uploaded_by = ? 
+           OR reviewed_by = ? 
+           OR completed_by = ? 
+           OR assigned_to = ? 
+        LIMIT 1
+      `).get(targetId, targetId, targetId, targetId);
+      if (imgCheck) hasFk = true;
+    }
+
+    if (!hasFk) {
+      const logCheck = db.prepare('SELECT 1 FROM activity_log WHERE actor_id = ? LIMIT 1').get(targetId);
+      if (logCheck) hasFk = true;
+    }
+  } catch (e) {
+    console.error('Error checking user FK constraints:', e);
   }
 
   if (hasFk) {
     db.prepare('UPDATE users SET is_active = 0 WHERE id = ?').run(targetId);
+    db.prepare('DELETE FROM project_assignments WHERE user_id = ?').run(targetId);
     res.json({ ok: true, soft_deleted: true });
   } else {
-    db.prepare('DELETE FROM users WHERE id = ?').run(targetId);
-    res.status(204).end();
+    try {
+      db.prepare('DELETE FROM users WHERE id = ?').run(targetId);
+      res.status(204).end();
+    } catch (err) {
+      if (err.code === 'SQLITE_CONSTRAINT' || (err.message && err.message.includes('FOREIGN KEY'))) {
+        db.prepare('UPDATE users SET is_active = 0 WHERE id = ?').run(targetId);
+        db.prepare('DELETE FROM project_assignments WHERE user_id = ?').run(targetId);
+        res.json({ ok: true, soft_deleted: true });
+      } else {
+        throw err;
+      }
+    }
   }
 });
 

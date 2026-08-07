@@ -1,4 +1,5 @@
 export type UserRole = 'annotator' | 'reviewer' | 'admin';
+export type ProjectStatus = 'planning' | 'active' | 'done';
 
 export interface User {
   id: number;
@@ -11,6 +12,17 @@ export interface User {
   last_login_at?: string | null;
 }
 
+export interface ProjectMember {
+  user_id: number;
+  display_name: string;
+  username: string;
+  color: string;
+  role: UserRole;
+  assigned_count: number;
+  labeled_count: number;
+  done_count: number;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -18,9 +30,13 @@ export interface Project {
   created_at: string;
   image_count: number;
   labeled_count: number;
+  completed_count?: number;
   class_count: number;
+  status?: ProjectStatus;
+  label_type?: 'bbox' | 'quad' | 'classify' | 'text_rec';
   /** STEP-4.2: model mặc định cho prefill tự động khi mở ảnh chưa có annotation. */
   default_model_id?: string | null;
+  members?: ProjectMember[];
 }
 
 export interface ClassLabel {
@@ -57,7 +73,7 @@ export interface ImageItem {
   annotations?: Annotation[];
 }
 
-export type AnnotationType = 'bbox' | 'quad';
+export type AnnotationType = 'bbox' | 'quad' | 'classify' | 'text_rec';
 
 export interface Point {
   x: number;
@@ -74,6 +90,7 @@ export interface Annotation {
   h: number;
   type: AnnotationType;
   points: [Point, Point, Point, Point] | null;
+  text_content?: string | null;
 }
 
 export interface ImageWithAnnotations extends ImageItem {

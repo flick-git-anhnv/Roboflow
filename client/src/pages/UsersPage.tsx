@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, getCurrentUser } from '../api';
 import type { User, UserRole } from '../types';
-import { Users, UserPlus, Trash2, CheckCircle2, XCircle, ShieldCheck, User as UserIcon } from 'lucide-react';
+import { Users, UserPlus, Trash2, CheckCircle2, XCircle, ShieldCheck, User as UserIcon, Pencil } from 'lucide-react';
 
 const ROLE_LABEL: Record<UserRole, string> = {
   annotator: 'Annotator',
@@ -23,6 +23,10 @@ export default function UsersPage() {
   const [newPassword, setNewPassword] = useState('');
   const [newDisplayName, setNewDisplayName] = useState('');
   const [newRole, setNewRole] = useState<UserRole>('annotator');
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [showInactive, setShowInactive] = useState(false);
+
+  const visibleUsers = showInactive ? users : users.filter((u) => u.is_active !== 0);
 
   const refresh = () => {
     setLoading(true);
@@ -112,10 +116,17 @@ export default function UsersPage() {
           <Users size={26} color="var(--accent-color)" />
           <span>Quản lý tài khoản</span>
         </h1>
-        <button className="btn btn-primary" onClick={() => setShowCreate((v) => !v)}>
-          <UserPlus size={18} />
-          <span>{showCreate ? 'Đóng' : 'Thêm tài khoản'}</span>
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer', userSelect: 'none', margin: 0, color: 'var(--text-secondary)' }}>
+            <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)}
+              style={{ width: 16, height: 16, cursor: 'pointer' }} />
+            <span>Hiển thị tài khoản đã khoá</span>
+          </label>
+          <button className="btn btn-primary" onClick={() => setShowCreate((v) => !v)}>
+            <UserPlus size={18} />
+            <span>{showCreate ? 'Đóng' : 'Thêm tài khoản'}</span>
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -186,7 +197,7 @@ export default function UsersPage() {
               </tr>
             </thead>
             <tbody>
-              {users.map((u) => (
+              {visibleUsers.map((u) => (
                 <tr key={u.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
                   <td style={{ padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span style={{ width: 10, height: 10, borderRadius: '50%', background: u.color || 'var(--navy-light)', display: 'inline-block' }} />
@@ -215,12 +226,19 @@ export default function UsersPage() {
                     {u.last_login_at ? new Date(u.last_login_at).toLocaleString('vi-VN') : 'Chưa đăng nhập'}
                   </td>
                   <td style={{ padding: '10px 12px', textAlign: 'right' }}>
-                    <button className="btn btn-danger" style={{ padding: '3px 10px', fontSize: 12, gap: 4 }}
-                      disabled={u.id === currentUser.id}
-                      onClick={() => handleDelete(u)}>
-                      <Trash2 size={13} />
-                      <span>Xoá</span>
-                    </button>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                      <button className="btn btn-outline" style={{ padding: '3px 10px', fontSize: 12, gap: 4 }}
+                        onClick={() => setEditingUser(u)}>
+                        <Pencil size={13} />
+                        <span>Sửa</span>
+                      </button>
+                      <button className="btn btn-danger" style={{ padding: '3px 10px', fontSize: 12, gap: 4 }}
+                        disabled={u.id === currentUser.id}
+                        onClick={() => handleDelete(u)}>
+                        <Trash2 size={13} />
+                        <span>Xoá</span>
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -228,6 +246,115 @@ export default function UsersPage() {
           </table>
         </div>
       )}
+
+      {editingUser && (
+        <EditUserModal
+          user={editingUser}
+          onClose={() => setEditingUser(null)}
+          onUpdated={() => {
+            refresh();
+            setEditingUser(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function EditUserModal({ user, onClose, onUpdated }: { user: User; onClose: () => void; onUpdated: (u: User) => void }) {
+  const [displayName, setDisplayName] = useState(user.display_name);
+  const [color, setColor] = useState(user.color || '#4A3F8C');
+  const [password, setPassword] = useState('');
+  const [role, setRole] = useState<UserRole>(user.role);
+  const [isActive, setIsActive] = useState(user.is_active === 1);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const currentUser = getCurrentUser();
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!displayName.trim()) { setError('Vui lòng nhập tên hiển thị'); return; }
+    if (password && password.length < 6) { setError('Mật khẩu tối thiểu 6 ký tự'); return; }
+
+    setBusy(true); setError('');
+    try {
+      const patch: any = {
+        display_name: displayName.trim(),
+        color,
+      };
+      if (password) {
+        patch.password = password;
+      }
+      if (user.id !== currentUser?.id) {
+        patch.role = role;
+        patch.is_active = isActive;
+      }
+      const updated = await api.updateUser(user.id, patch);
+      onUpdated(updated);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
+        <h2>Chỉnh sửa tài khoản</h2>
+        <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div className="field">
+            <label>Tên đăng nhập (không thể sửa)</label>
+            <input value={user.username} disabled style={{ opacity: 0.6 }} />
+          </div>
+          <div className="field">
+            <label>Tên hiển thị</label>
+            <input value={displayName} onChange={(e) => setDisplayName(e.target.value)}
+              placeholder="Tên hiển thị" autoFocus required />
+          </div>
+          <div className="field">
+            <label>Màu sắc đại diện (HEX)</label>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input type="color" value={color} onChange={(e) => setColor(e.target.value)}
+                style={{ width: 40, height: 36, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }} />
+              <input type="text" value={color} onChange={(e) => setColor(e.target.value)}
+                placeholder="#RRGGBB" pattern="^#[0-9A-Fa-f]{6}$" required
+                style={{ flex: 1, padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border-color)', background: 'var(--bg-card)', color: 'var(--text-primary)', boxSizing: 'border-box' }} />
+            </div>
+          </div>
+          <div className="field">
+            <label>Mật khẩu mới (để trống nếu không đổi)</label>
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+              placeholder="Nhập mật khẩu mới nếu muốn đổi" autoComplete="new-password" />
+          </div>
+          {user.id !== currentUser?.id && (
+            <>
+              <div className="field">
+                <label>Vai trò</label>
+                <select value={role} onChange={(e) => setRole(e.target.value as UserRole)}
+                  style={{ display: 'block', width: '100%', marginTop: 4, padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border-color)', background: 'var(--bg-card)', color: 'var(--text-primary)' }}>
+                  <option value="annotator">Annotator — label ảnh</option>
+                  <option value="reviewer">Reviewer — duyệt/từ chối nhãn</option>
+                  <option value="admin">Admin — toàn quyền</option>
+                </select>
+              </div>
+              <div className="field" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                <input type="checkbox" id="user-is-active" checked={isActive} onChange={(e) => setIsActive(e.target.checked)}
+                  style={{ width: 16, height: 16 }} />
+                <label htmlFor="user-is-active" style={{ fontSize: 13, cursor: 'pointer', margin: 0 }}>Tài khoản hoạt động</label>
+              </div>
+            </>
+          )}
+          {error && <span className="error-text">{error}</span>}
+          <div className="modal-actions" style={{ marginTop: 8 }}>
+            <button type="button" className="btn btn-outline" onClick={onClose}>Huỷ</button>
+            <button type="submit" className="btn btn-primary" disabled={busy}>
+              {busy ? 'Đang lưu...' : 'Lưu thay đổi'}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

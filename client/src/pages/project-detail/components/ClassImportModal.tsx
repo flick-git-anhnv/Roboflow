@@ -5,6 +5,7 @@ import { X, FileCode, Copy, UploadCloud, CheckCircle2, AlertCircle } from 'lucid
 
 interface ClassImportModalProps {
   projectId: string;
+  project?: Project;
   onClose: () => void;
   onSuccess: (updatedClasses: ClassLabel[]) => void;
 }
@@ -55,12 +56,79 @@ function parseYoloYaml(content: string): string[] {
 
 export const ClassImportModal: React.FC<ClassImportModalProps> = ({
   projectId,
+  project,
   onClose,
   onSuccess,
 }) => {
   const [activeTab, setActiveTab] = useState<'yaml' | 'project'>('yaml');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [charset, setCharset] = useState("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~");
+
+  if (project?.label_type === 'text_rec') {
+    return (
+      <div className="modal-overlay" onClick={onClose}>
+        <div className="modal export-modal" style={{ maxWidth: 550 }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <h2 style={{ margin: 0 }}>Import Charset (Nhận dạng Text)</h2>
+            <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+              <X size={20} />
+            </button>
+          </div>
+
+          {error && (
+            <div className="alert alert-error" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderRadius: 6, backgroundColor: '#fdf2f2', color: '#c0392b', marginBottom: 16, fontSize: 13, border: '1px solid #f8d7da' }}>
+              <AlertCircle size={16} />
+              <span>{error}</span>
+            </div>
+          )}
+
+          <div style={{ marginBottom: 16 }}>
+            <p style={{ fontSize: 14, color: '#444', lineHeight: 1.5, marginBottom: 12 }}>
+              Dự án này sử dụng loại gán nhãn <strong>Nhận dạng Text (Text Recognition)</strong>. Bạn có thể thay đổi và import bộ ký tự (charset) chuẩn dưới đây làm danh sách nhãn cho dự án:
+            </p>
+            <div className="field">
+              <label style={{ fontWeight: 500, display: 'block', marginBottom: 6 }}>Bộ ký tự chuẩn (Charset)</label>
+              <textarea
+                className="form-control"
+                style={{ width: '100%', minHeight: 80, padding: 8, fontFamily: 'monospace', fontSize: 13, border: '1px solid #ccc', borderRadius: 4, resize: 'vertical' }}
+                value={charset}
+                onChange={(e) => setCharset(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="modal-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <button className="btn btn-outline" onClick={onClose} disabled={loading}>
+              Hủy
+            </button>
+            <button
+              className="btn btn-primary"
+              onClick={async () => {
+                setLoading(true);
+                setError(null);
+                try {
+                  const chars = charset.split('');
+                  const updated = await api.importBulkClasses(projectId, chars);
+                  onSuccess(updated);
+                  onClose();
+                } catch (err: any) {
+                  setError(err.message || 'Lỗi khi import charset.');
+                } finally {
+                  setLoading(false);
+                }
+              }}
+              disabled={loading}
+            >
+              {loading ? 'Đang import...' : 'Import Charset'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
 
   // Tab 1: YAML States
   const [localPath, setLocalPath] = useState('');

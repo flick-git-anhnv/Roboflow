@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import { Loader2 } from 'lucide-react';
 import { getCurrentUser } from '../../api';
 
 import StatsPanel from '../../components/StatsPanel';
@@ -67,6 +68,7 @@ export default function ProjectDetailPage() {
     setImages,
     models,
     load,
+    loading,
     addClass,
     updateClass,
     removeClass,
@@ -138,12 +140,22 @@ export default function ProjectDetailPage() {
     return () => document.removeEventListener('mousedown', onClickOutside);
   }, [classFilterOpen, setClassFilterOpen]);
 
-  if (!project) return <p>Đang tải...</p>;
+  if (loading || !project) {
+    return (
+      <div style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        minHeight: '60vh', gap: 12, color: 'var(--text-secondary)'
+      }}>
+        <Loader2 className="animate-spin" size={36} color="var(--accent-color)" />
+        <p style={{ fontSize: 14, fontWeight: 500 }}>Đang tải dữ liệu dự án...</p>
+      </div>
+    );
+  }
 
   const labeledCount = images.filter((i) => i.status === 'labeled' || i.completed_at).length;
 
   return (
-    <div>
+    <div className="project-detail-container">
       <ProjectDetailHeader
         project={project}
         fileInputRef={fileInputRef}
@@ -200,7 +212,7 @@ export default function ProjectDetailPage() {
           </div>
         </div>
 
-        <div>
+        <div className="main-panel">
           <ImageFilterBar
             search={search}
             statusFilter={statusFilter}
@@ -239,18 +251,20 @@ export default function ProjectDetailPage() {
             onClearSelection={clearSelection}
           />
 
-          <ImageGrid
-            images={images}
-            filteredImages={filteredImages}
-            pagedImages={pagedImages}
-            projectId={project.id}
-            selectedIds={selectedIds}
-            classById={classById}
-            onToggleSelect={toggleSelect}
-            onChangeSplit={changeSplit}
-            onRemoveImage={removeImage}
-            gridSize={gridSize}
-          />
+          <div className="grid-scroll-container">
+            <ImageGrid
+              images={images}
+              filteredImages={filteredImages}
+              pagedImages={pagedImages}
+              projectId={project.id}
+              selectedIds={selectedIds}
+              classById={classById}
+              onToggleSelect={toggleSelect}
+              onChangeSplit={changeSplit}
+              onRemoveImage={removeImage}
+              gridSize={gridSize}
+            />
+          </div>
 
           {filteredImages.length > 0 && (
             <PaginationControls page={currentPage} pageCount={pageCount} onChange={setPage} />
@@ -259,7 +273,13 @@ export default function ProjectDetailPage() {
       </div>
 
       {statsOpen && project && <StatsPanel projectId={project.id} onClose={() => setStatsOpen(false)} />}
-      {exportOpen && project && <ExportModal projectId={project.id} onClose={() => setExportOpen(false)} />}
+      {exportOpen && project && (
+        <ExportModal
+          projectId={project.id}
+          labelType={project.label_type}
+          onClose={() => setExportOpen(false)}
+        />
+      )}
       {validateOpen && project && <ValidateModal projectId={project.id} onClose={() => setValidateOpen(false)} />}
       {assignmentOpen && project && <AssignmentModal projectId={project.id} onClose={() => { setAssignmentOpen(false); load(); }} />}
       {autoLabelOpen && project && (
@@ -273,6 +293,7 @@ export default function ProjectDetailPage() {
       {importOpen && project && (
         <ClassImportModal
           projectId={project.id}
+          project={project}
           onClose={() => setImportOpen(false)}
           onSuccess={(updatedClasses) => {
             setClasses(updatedClasses);

@@ -91,6 +91,7 @@ export default function AnnotatorPage() {
 
   // Core Data & API Hook
   const {
+    project,
     classes,
     images,
     image,
@@ -107,6 +108,7 @@ export default function AnnotatorPage() {
     copyingLabels,
     setCopyingLabels,
     scheduleSave,
+    flushSave,
     handleSubmitReview,
     handleApprove,
     handleReject,
@@ -447,6 +449,9 @@ export default function AnnotatorPage() {
   useEffect(() => () => detachWindowDragListeners(), [detachWindowDragListeners]);
 
   const onMouseDown = (e: React.MouseEvent) => {
+    if (project?.label_type === 'classify' || project?.label_type === 'text_rec') {
+      return;
+    }
     if (spaceHeld || e.button === 1) {
       e.preventDefault();
       startPan(e);
@@ -523,6 +528,10 @@ export default function AnnotatorPage() {
   };
 
   const onMouseMove = (e: React.MouseEvent) => {
+    if (project?.label_type === 'classify' || project?.label_type === 'text_rec') {
+      if (canvasRef.current) canvasRef.current.style.cursor = 'default';
+      return;
+    }
     const pos = toImageCoords(e.clientX, e.clientY);
     lastMousePosRef.current = pos;
     if (dragRef.current.mode !== 'none') return;
@@ -802,8 +811,89 @@ export default function AnnotatorPage() {
 
   const cancelDrawing = useCallback(() => setDrawingPoints([]), []);
 
+  // Classification state & save helper
+  const classifyImage = useCallback(async (classId: string) => {
+    const newBox: Box = {
+      id: `class_${Date.now()}`,
+      class_id: classId,
+      type: 'classify',
+      x: 0,
+      y: 0,
+      w: 0,
+      h: 0,
+    };
+    setBoxes([newBox]);
+    scheduleSave([newBox]);
+
+    if (!image?.completed_at) {
+      await handleMarkDone();
+    }
+
+    await flushSave();
+
+    const next = images[currentIndex + 1];
+    if (next) {
+      navigate(`/projects/${projectId}/annotate/${next.id}`);
+    } else {
+      alert('Đã gán nhãn xong ảnh cuối cùng của dự án. Quay lại trang chi tiết dự án.');
+      navigate(`/projects/${projectId}`);
+    }
+  }, [setBoxes, scheduleSave, image, handleMarkDone, flushSave, images, currentIndex, navigate, projectId]);
+
+  // Text recognition state & save helpers
+  const [textValue, setTextValue] = useState('');
+  useEffect(() => {
+    if (project?.label_type === 'text_rec') {
+      setTextValue(boxes[0]?.text_content || '');
+    }
+  }, [boxes, project?.label_type]);
+
+  const saveTextRecognition = useCallback((val: string) => {
+    const classId = activeClassId || classes[0]?.id;
+    if (!classId) return;
+    const newBox: Box = {
+      id: boxes[0]?.id || `text_${Date.now()}`,
+      class_id: classId,
+      type: 'text_rec',
+      x: 0,
+      y: 0,
+      w: 0,
+      h: 0,
+      text_content: val.trim(),
+    };
+    const newBoxes = val.trim() ? [newBox] : [];
+    setBoxes(newBoxes);
+    scheduleSave(newBoxes);
+  }, [boxes, activeClassId, classes, setBoxes, scheduleSave]);
+
+  const handleSaveAndNextText = async () => {
+    saveTextRecognition(textValue);
+
+    if (textValue.trim() && !image?.completed_at) {
+      await handleMarkDone();
+    }
+
+    await flushSave();
+
+    const next = images[currentIndex + 1];
+    if (next) {
+      navigate(`/projects/${projectId}/annotate/${next.id}`);
+    } else {
+      alert('Đã gán nhãn xong ảnh cuối cùng của dự án. Quay lại trang chi tiết dự án.');
+      navigate(`/projects/${projectId}`);
+    }
+  };
+
+  const handleTextEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleSaveAndNextText();
+    }
+  };
+
   // Keyboard Shortcuts Hook
   useHotkeys({
+    labelType: project?.label_type,
     selectedId,
     selectedIds,
     drawingPoints,
@@ -827,6 +917,7 @@ export default function AnnotatorPage() {
     onGoTo: goTo,
     onHandleMarkDone: handleMarkDone,
     onHandleUnmarkDone: handleUnmarkDone,
+    onClassifyImage: classifyImage,
   });
 
   if (!image) return <p>Đang tải ảnh...</p>;
@@ -884,17 +975,24 @@ export default function AnnotatorPage() {
 
       <div
         className="annotator-layout"
-        style={showFilmstrip ? { height: 'calc(100vh - 246px)' } : undefined}
+        style={{
+          gridTemplateColumns: (project?.label_type === 'classify' || project?.label_type === 'text_rec')
+            ? '1fr 320px'
+            : undefined,
+          height: showFilmstrip ? 'calc(100vh - 246px)' : undefined
+        }}
       >
-        <ClassPickerPanel
-          classes={classes}
-          boxes={boxes}
-          selectedId={selectedId}
-          selectedIds={selectedIds}
-          activeClassId={activeClassId}
-          mruClassIds={mruClassIds}
-          onAssignClassToSelected={assignClassToSelected}
-        />
+        {project?.label_type !== 'classify' && project?.label_type !== 'text_rec' && (
+          <ClassPickerPanel
+            classes={classes}
+            boxes={boxes}
+            selectedId={selectedId}
+            selectedIds={selectedIds}
+            activeClassId={activeClassId}
+            mruClassIds={mruClassIds}
+            onAssignClassToSelected={assignClassToSelected}
+          />
+        )}
 
         <AnnotatorCanvas
           spaceHeld={spaceHeld}
@@ -907,14 +1005,129 @@ export default function AnnotatorPage() {
           onContextMenu={(e) => { e.preventDefault(); if (drawingPoints.length > 0) undoLastPoint(); }}
         />
 
-        <AnnotationListPanel
-          boxes={boxes}
-          classById={classById}
-          selectedId={selectedId}
-          selectedIds={selectedIds}
-          onSelectOnly={selectOnly}
-          onUpdateBoxes={updateBoxes}
-        />
+        {project?.label_type !== 'classify' && project?.label_type !== 'text_rec' && (
+          <AnnotationListPanel
+            boxes={boxes}
+            classById={classById}
+            selectedId={selectedId}
+            selectedIds={selectedIds}
+            onSelectOnly={selectOnly}
+            onUpdateBoxes={updateBoxes}
+          />
+        )}
+
+        {project?.label_type === 'classify' && (
+          <div
+            className="classify-panel card"
+            style={{
+              padding: '24px',
+              background: 'var(--bg-card)',
+              border: '1px solid var(--border-color)',
+              borderRadius: '12px',
+              boxShadow: 'var(--shadow-md)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '20px',
+              height: '100%',
+              overflow: 'hidden',
+            }}
+          >
+            <h3 style={{ margin: 0, fontSize: '18px', color: 'var(--navy-light)' }}>Chọn phân loại</h3>
+            <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
+              Bấm nút hoặc gõ phím tắt tương ứng để phân loại ảnh và tự động chuyển sang ảnh tiếp theo.
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', overflowY: 'auto', flex: 1, paddingRight: '4px' }}>
+              {classes.map((cls) => {
+                const isSelected = boxes[0]?.class_id === cls.id;
+                return (
+                  <button
+                    key={cls.id}
+                    onClick={() => classifyImage(cls.id)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '14px 18px',
+                      borderRadius: '8px',
+                      border: isSelected ? `2px solid ${cls.color}` : '1px solid var(--border-color)',
+                      background: isSelected ? `${cls.color}15` : 'var(--bg-secondary)',
+                      color: 'var(--text-primary)',
+                      cursor: 'pointer',
+                      fontWeight: isSelected ? 'bold' : 'normal',
+                      textAlign: 'left',
+                      transition: 'all 0.15s ease',
+                      boxShadow: isSelected ? 'var(--shadow-sm)' : 'none',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ width: '12px', height: '12px', borderRadius: '50%', background: cls.color }} />
+                      <span style={{ fontSize: '14px' }}>{cls.name}</span>
+                    </div>
+                    {cls.hotkey && (
+                      <span style={{ fontSize: '11px', background: 'var(--bg-card)', border: '1px solid var(--border-color)', padding: '3px 8px', borderRadius: '4px', color: 'var(--text-secondary)', fontWeight: 'bold' }}>
+                        {cls.hotkey.toUpperCase()}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {project?.label_type === 'text_rec' && (
+          <div
+            className="text-rec-panel card"
+            style={{
+              padding: '24px',
+              background: 'var(--bg-card)',
+              border: '1px solid var(--border-color)',
+              borderRadius: '12px',
+              boxShadow: 'var(--shadow-md)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '20px',
+              height: '100%',
+            }}
+          >
+            <h3 style={{ margin: 0, fontSize: '18px', color: 'var(--navy-light)' }}>Nhận diện chữ</h3>
+            <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
+              Nhập nội dung văn bản (biển số xe, v.v.) của ảnh này. Nhấn <b>Enter</b> để Lưu &amp; Tiếp tục.
+            </p>
+            <div className="field" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <label style={{ fontWeight: 'bold', fontSize: '14px', color: 'var(--text-primary)' }}>Nội dung văn bản</label>
+              <input
+                value={textValue}
+                onChange={(e) => setTextValue(e.target.value)}
+                onKeyDown={handleTextEnter}
+                onBlur={() => saveTextRecognition(textValue)}
+                placeholder="Gõ nội dung..."
+                autoFocus
+                style={{
+                  padding: '14px 16px',
+                  fontSize: '16px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-color)',
+                  background: 'var(--bg-secondary)',
+                  color: 'var(--text-primary)',
+                  width: '100%',
+                  boxSizing: 'border-box',
+                  outline: 'none',
+                  transition: 'border-color 0.15s ease',
+                }}
+              />
+            </div>
+            <div style={{ marginTop: 'auto' }}>
+              <button
+                className="btn btn-primary"
+                onClick={handleSaveAndNextText}
+                style={{ width: '100%', padding: '14px', fontSize: '14px', fontWeight: 'bold', borderRadius: '8px' }}
+              >
+                Lưu &amp; Tiếp tục →
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <QuickClassSwitcherModal

@@ -3,6 +3,7 @@ import type { ClassLabel, ImageWithAnnotations } from '../../../types';
 import type { Point } from '../types';
 
 interface UseHotkeysOptions {
+  labelType?: string;
   selectedId: string | null;
   selectedIds: Set<string>;
   drawingPoints: Point[];
@@ -26,9 +27,11 @@ interface UseHotkeysOptions {
   onGoTo: (delta: number) => void;
   onHandleMarkDone: () => void;
   onHandleUnmarkDone: () => void;
+  onClassifyImage?: (classId: string) => void;
 }
 
 export function useHotkeys({
+  labelType,
   selectedId,
   selectedIds,
   drawingPoints,
@@ -52,6 +55,7 @@ export function useHotkeys({
   onGoTo,
   onHandleMarkDone,
   onHandleUnmarkDone,
+  onClassifyImage,
 }: UseHotkeysOptions) {
   const hotkeyBufferRef = useRef<string>('');
   const hotkeyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -121,6 +125,7 @@ export function useHotkeys({
       }
 
       if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+        const isClassify = labelType === 'classify';
         // Buffer 2-char hotkey (500ms debounce)
         if (e.key.length === 1 && /[a-zA-Z0-9]/.test(e.key)) {
           hotkeyBufferRef.current += e.key.toLowerCase();
@@ -131,10 +136,18 @@ export function useHotkeys({
 
           if (buf.length === 2) {
             const match2 = classes.find((c) => c.hotkey?.trim().toLowerCase() === buf);
-            if (match2) { onAssignClassToSelected(match2.id); hotkeyBufferRef.current = ''; return; }
+            if (match2) {
+              if (isClassify && onClassifyImage) onClassifyImage(match2.id);
+              else onAssignClassToSelected(match2.id);
+              hotkeyBufferRef.current = '';
+              return;
+            }
             const lastKey = e.key.toLowerCase();
             const match1 = classes.find((c) => c.hotkey?.trim().toLowerCase() === lastKey && (c.hotkey?.trim().length ?? 0) === 1);
-            if (match1) onAssignClassToSelected(match1.id);
+            if (match1) {
+              if (isClassify && onClassifyImage) onClassifyImage(match1.id);
+              else onAssignClassToSelected(match1.id);
+            }
             hotkeyBufferRef.current = '';
             return;
           }
@@ -146,7 +159,10 @@ export function useHotkeys({
 
           if (!hasAmbiguous) {
             const match1 = classes.find((c) => c.hotkey?.trim().toLowerCase() === buf && (c.hotkey?.trim().length ?? 0) === 1);
-            if (match1) onAssignClassToSelected(match1.id);
+            if (match1) {
+              if (isClassify && onClassifyImage) onClassifyImage(match1.id);
+              else onAssignClassToSelected(match1.id);
+            }
             hotkeyBufferRef.current = '';
             return;
           }
@@ -155,7 +171,10 @@ export function useHotkeys({
             const b = hotkeyBufferRef.current;
             hotkeyBufferRef.current = '';
             const match = classes.find((c) => c.hotkey?.trim().toLowerCase() === b);
-            if (match) onAssignClassToSelected(match.id);
+            if (match) {
+              if (isClassify && onClassifyImage) onClassifyImage(match.id);
+              else onAssignClassToSelected(match.id);
+            }
           }, 500);
           return;
         }
@@ -179,10 +198,11 @@ export function useHotkeys({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [
-    selectedId, selectedIds, drawingPoints, mruClassIds, classes, image, clipboardBoxRef,
+    labelType, selectedId, selectedIds, drawingPoints, mruClassIds, classes, image, clipboardBoxRef,
     setShowSwitcher, setSwitcherQuery, setSwitcherIdx, onUndo, onRedo, onUndoLastPoint,
     onCancelDrawing, onSelectOnly, onDeleteSelected, onCopySelectedBox, onPasteBox,
     onCopyLabelsFromPrev, onAssignClassToSelected, onGoTo, onHandleMarkDone, onHandleUnmarkDone,
+    onClassifyImage,
   ]);
 }
 

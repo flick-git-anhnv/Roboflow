@@ -11,7 +11,13 @@ const FORMAT_INFO: Record<Format, { label: string; desc: string }> = {
   voc: { label: 'Pascal VOC', desc: 'XML annotation cho mỗi ảnh' },
 };
 
-export default function ExportModal({ projectId, onClose }: { projectId: string; onClose: () => void }) {
+interface ExportModalProps {
+  projectId: string;
+  labelType?: string;
+  onClose: () => void;
+}
+
+export default function ExportModal({ projectId, labelType, onClose }: ExportModalProps) {
   const [format, setFormat] = useState<Format>('yolo');
   const [splitMode, setSplitMode] = useState<SplitMode>('manual');
   const [trainRatio, setTrainRatio] = useState(0.8);
@@ -44,15 +50,35 @@ export default function ExportModal({ projectId, onClose }: { projectId: string;
 
         <div className="field">
           <label>Định dạng</label>
-          <div className="format-options">
-            {(Object.keys(FORMAT_INFO) as Format[]).map((f) => (
-              <label key={f} className={`format-option ${format === f ? 'active' : ''}`}>
-                <input type="radio" name="format" checked={format === f} onChange={() => setFormat(f)} />
-                <span className="format-option-label">{FORMAT_INFO[f].label}</span>
-                <span className="format-option-desc">{FORMAT_INFO[f].desc}</span>
-              </label>
-            ))}
-          </div>
+          {labelType === 'classify' ? (
+            <div style={{ padding: '12px', border: '1px solid var(--border-color)', borderRadius: '8px', background: 'var(--bg-secondary)' }}>
+              <span style={{ fontWeight: 'bold', display: 'block', marginBottom: '4px', color: 'var(--navy-light)' }}>
+                Folder phân lớp (Image Classification)
+              </span>
+              <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                Cấu trúc: <code>[split]/[class_name]/[filename]</code> + file chỉ mục <code>metadata.csv</code>
+              </span>
+            </div>
+          ) : labelType === 'text_rec' ? (
+            <div style={{ padding: '12px', border: '1px solid var(--border-color)', borderRadius: '8px', background: 'var(--bg-secondary)' }}>
+              <span style={{ fontWeight: 'bold', display: 'block', marginBottom: '4px', color: 'var(--navy-light)' }}>
+                Nhận diện chữ / OCR (PaddleOCR Format)
+              </span>
+              <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                Cấu trúc: Thư mục ảnh và tệp <code>gt_[split].txt</code> chứa đường dẫn ảnh cùng chuỗi text tương ứng.
+              </span>
+            </div>
+          ) : (
+            <div className="format-options">
+              {(Object.keys(FORMAT_INFO) as Format[]).map((f) => (
+                <label key={f} className={`format-option ${format === f ? 'active' : ''}`}>
+                  <input type="radio" name="format" checked={format === f} onChange={() => setFormat(f)} />
+                  <span className="format-option-label">{FORMAT_INFO[f].label}</span>
+                  <span className="format-option-desc">{FORMAT_INFO[f].desc}</span>
+                </label>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="field">

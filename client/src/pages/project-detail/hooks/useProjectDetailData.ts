@@ -7,13 +7,23 @@ export function useProjectDetailData(projectId: string | undefined) {
   const [classes, setClasses] = useState<ClassLabel[]>([]);
   const [images, setImages] = useState<ImageItem[]>([]);
   const [models, setModels] = useState<ModelInfo[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
     if (!projectId) return;
-    api.getProject(projectId).then(setProject);
-    api.listClasses(projectId).then(setClasses);
-    api.listImages(projectId).then(setImages);
-    api.listModels(projectId).then(setModels);
+    setLoading(true);
+    try {
+      await Promise.all([
+        api.getProject(projectId).then(setProject),
+        api.listClasses(projectId).then(setClasses),
+        api.listImages(projectId).then(setImages),
+        api.listModels(projectId).then(setModels),
+      ]);
+    } catch (err) {
+      console.error('[useProjectDetailData] Failed to load project data:', err);
+    } finally {
+      setLoading(false);
+    }
   }, [projectId]);
 
   useEffect(() => { load(); }, [load]);
@@ -67,6 +77,7 @@ export function useProjectDetailData(projectId: string | undefined) {
   return {
     project,
     setProject,
+    loading,
     classes,
     setClasses,
     images,

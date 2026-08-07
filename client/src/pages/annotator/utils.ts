@@ -29,12 +29,22 @@ export function pointInPolygon(x: number, y: number, points: Point[]): boolean {
 }
 
 export function cloneBox(b: Box): Box {
-  return { ...b, points: b.points ? (b.points.map((p) => ({ ...p })) as [Point, Point, Point, Point]) : undefined };
+  return {
+    ...b,
+    points: b.points ? (b.points.map((p) => ({ ...p })) as [Point, Point, Point, Point]) : undefined,
+    text_content: b.text_content
+  };
 }
 
 export function annotationToBox(a: Annotation): Box {
   if (a.type === 'quad' && a.points && a.points.length === 4) {
     return { id: a.id, class_id: a.class_id, type: 'quad', x: a.x, y: a.y, w: a.w, h: a.h, points: a.points };
+  }
+  if (a.type === 'classify') {
+    return { id: a.id, class_id: a.class_id, type: 'classify', x: a.x, y: a.y, w: a.w, h: a.h };
+  }
+  if (a.type === 'text_rec') {
+    return { id: a.id, class_id: a.class_id, type: 'text_rec', x: a.x, y: a.y, w: a.w, h: a.h, text_content: a.text_content || '' };
   }
   return { id: a.id, class_id: a.class_id, type: 'bbox', x: a.x, y: a.y, w: a.w, h: a.h };
 }

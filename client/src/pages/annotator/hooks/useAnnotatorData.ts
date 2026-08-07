@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../../../api';
-import type { Annotation, ClassLabel, ImageItem, ImageWithAnnotations } from '../../../types';
+import type { Annotation, ClassLabel, ImageItem, ImageWithAnnotations, Project } from '../../../types';
 import type { Box } from '../types';
 import { annotationToBox, suggestionToBox } from '../utils';
 
@@ -9,6 +9,7 @@ export function useAnnotatorData(
   imageId?: string,
   onClearHistory?: () => void,
 ) {
+  const [project, setProject] = useState<Project | null>(null);
   const [classes, setClasses] = useState<ClassLabel[]>([]);
   const [images, setImages] = useState<ImageItem[]>([]);
   const [image, setImage] = useState<ImageWithAnnotations | null>(null);
@@ -22,11 +23,25 @@ export function useAnnotatorData(
   const [copyingLabels, setCopyingLabels] = useState(false);
 
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingSaveRef = useRef<(() => Promise<void>) | null>(null);
   const annotationVersionRef = useRef<number>(0);
 
-  // Fetch classes and images for project
+  const flushSave = useCallback(async () => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    if (pendingSaveRef.current) {
+      const saveFn = pendingSaveRef.current;
+      pendingSaveRef.current = null;
+      await saveFn();
+    }
+  }, []);
+
+  // Fetch classes, images and project details
   useEffect(() => {
     if (!projectId) return;
+    api.getProject(projectId).then(setProject);
     api.listClasses(projectId).then((cs) => {
       setClasses(cs);
       setActiveClassId((prev) => prev || cs[0]?.id || '');
@@ -37,6 +52,10 @@ export function useAnnotatorData(
   // Fetch single image data
   useEffect(() => {
     if (!projectId || !imageId) return;
+    
+    // Flush any pending save of the previous image before loading the new one
+    flushSave();
+
     let cancelled = false;
 
     setPrefillLoading(false);
@@ -68,13 +87,17 @@ export function useAnnotatorData(
       }
     });
 
-    return () => { cancelled = true; };
-  }, [projectId, imageId]);
+    return () => {
+      cancelled = true;
+      flushSave();
+    };
+  }, [projectId, imageId, flushSave]);
 
   const scheduleSave = useCallback((nextBoxes: Box[]) => {
     setSaveState('dirty');
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(async () => {
+
+    const saveFn = async () => {
       if (!imageId) return;
       setSaveState('saving');
       try {
@@ -83,6 +106,7 @@ export function useAnnotatorData(
           nextBoxes.map((b) => ({
             class_id: b.class_id, x: b.x, y: b.y, w: b.w, h: b.h,
             type: b.type, points: b.type === 'quad' && b.points ? b.points : null,
+            text_content: b.text_content || null,
           })),
           annotationVersionRef.current,
         );
@@ -109,7 +133,11 @@ export function useAnnotatorData(
           console.error('[AnnotatorPage] Save failed:', msg);
         }
       }
-    }, 600);
+      pendingSaveRef.current = null;
+    };
+
+    pendingSaveRef.current = saveFn;
+    saveTimer.current = setTimeout(saveFn, 600);
   }, [imageId, projectId, onClearHistory]);
 
   const handleSubmitReview = useCallback(async () => {
@@ -182,6 +210,7 @@ export function useAnnotatorData(
   }, [image, projectId]);
 
   return {
+    project,
     classes,
     setClasses,
     images,
@@ -203,6 +232,7 @@ export function useAnnotatorData(
     setCopyingLabels,
     annotationVersionRef,
     scheduleSave,
+    flushSave,
     handleSubmitReview,
     handleApprove,
     handleReject,

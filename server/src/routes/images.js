@@ -135,7 +135,7 @@ router.get('/', (req, res) => {
   let querySql = `
     SELECT i.*,
       (SELECT GROUP_CONCAT(class_id) FROM (SELECT class_id FROM annotations WHERE image_id = i.id ORDER BY x ASC)) AS class_ids_raw,
-      (SELECT json_group_array(json_object('id', id, 'image_id', image_id, 'class_id', class_id, 'x', x, 'y', y, 'w', w, 'h', h, 'type', type)) FROM annotations WHERE image_id = i.id) AS annotations_raw
+      (SELECT json_group_array(json_object('id', id, 'image_id', image_id, 'class_id', class_id, 'x', x, 'y', y, 'w', w, 'h', h, 'type', type, 'points', json(points), 'text_content', text_content)) FROM annotations WHERE image_id = i.id) AS annotations_raw
     FROM images i
     WHERE ${whereClause}
     ORDER BY i.created_at ASC

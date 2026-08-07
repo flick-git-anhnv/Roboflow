@@ -583,6 +583,28 @@ function m010_work_assignment() {
 
 m010_work_assignment();
 
+// ─── m011: project status (planning / active / done) ──────────────────────────
+// Thêm cột status vào bảng projects.
+// Default 'active' để tất cả project cũ không bị ảnh hưởng.
+function m011_project_status() {
+  const cols = db.prepare('PRAGMA table_info(projects)').all().map((c) => c.name);
+  if (cols.includes('status')) {
+    console.log('[INFO] m011: status column already exists, skipping');
+    return;
+  }
+  const before = db.prepare('SELECT COUNT(*) AS n FROM projects').get().n;
+  console.log(`[INFO] m011: projects row count BEFORE: ${before}`);
+  db.exec(`ALTER TABLE projects ADD COLUMN status TEXT NOT NULL DEFAULT 'active'`);
+  const after = db.prepare('SELECT COUNT(*) AS n FROM projects').get().n;
+  console.log(`[INFO] m011: projects row count AFTER: ${after}`);
+  if (before !== after) {
+    throw new Error(`[CRITICAL] DATA LOSS in projects: ${before} rows → ${after} rows. Migration: m011_project_status`);
+  }
+  console.log("[INFO] m011: status column added to projects ✓");
+}
+
+m011_project_status();
+
 runMigrations(db);
 
 // ─── Retention helper: annotation_history ─────────────────────────────────────

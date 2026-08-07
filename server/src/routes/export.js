@@ -131,6 +131,50 @@ router.get('/', (req, res) => {
 
   const imagePath = (img) => path.join(UPLOAD_DIR, project.id, img.filename);
 
+  const labelType = project.label_type || 'bbox';
+
+  if (labelType === 'classify') {
+    const metadataRows = ['filename,split,class_name'];
+    for (const img of images) {
+      const split = getSplit(img);
+      const imageFile = imagePath(img);
+      const anns = annotationsByImage.get(img.id) || [];
+      const classId = anns[0]?.class_id;
+      const cls = classes.find((c) => c.id === classId);
+      const className = cls ? cls.name : 'unlabeled';
+
+      if (fs.existsSync(imageFile)) {
+        archive.file(imageFile, { name: `images/${split}/${className}/${img.filename}` });
+      }
+      metadataRows.push(`${img.filename},${split},${className}`);
+    }
+    archive.append(metadataRows.join('\n'), { name: 'metadata.csv' });
+    archive.finalize();
+    return;
+  }
+
+  if (labelType === 'text_rec') {
+    const gtBySplit = { train: [], valid: [], test: [] };
+    for (const img of images) {
+      const split = getSplit(img);
+      const imageFile = imagePath(img);
+      const anns = annotationsByImage.get(img.id) || [];
+      const text = anns[0]?.text_content || '';
+
+      if (fs.existsSync(imageFile)) {
+        archive.file(imageFile, { name: `images/${split}/${img.filename}` });
+      }
+      gtBySplit[split].push(`images/${split}/${img.filename}\t${text}`);
+    }
+    for (const split of ['train', 'valid', 'test']) {
+      if (gtBySplit[split].length > 0) {
+        archive.append(gtBySplit[split].join('\n'), { name: `gt_${split}.txt` });
+      }
+    }
+    archive.finalize();
+    return;
+  }
+
   if (format === 'yolo') {
     let hasQuad = false;
     for (const img of images) {

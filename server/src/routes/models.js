@@ -15,12 +15,15 @@ const upload = multer({
       fs.mkdirSync(dir, { recursive: true });
       cb(null, dir);
     },
-    filename: (req, file, cb) => cb(null, `${nanoid()}.pt`),
+    filename: (req, file, cb) => {
+      const ext = path.extname(file.originalname).toLowerCase();
+      cb(null, `${nanoid()}${ext}`);
+    },
   }),
   limits: { fileSize: 1024 * 1024 * 1024 }, // 1GB
   fileFilter: (req, file, cb) => {
-    const ok = /\.pt$/i.test(file.originalname);
-    cb(ok ? null : new Error('Chỉ chấp nhận file model YOLO định dạng .pt'), ok);
+    const ok = /\.(pt|onnx)$/i.test(file.originalname);
+    cb(ok ? null : new Error('Chỉ chấp nhận file model định dạng .pt hoặc .onnx'), ok);
   },
 });
 

@@ -143,9 +143,9 @@ export const ImageTile: React.FC<ImageTileProps> = ({
           ✓ Xong
         </span>
       )}
-      {img.class_ids && img.class_ids.length > 0 && (
+      {img.annotations && img.annotations.some(ann => ann.type === 'text_rec') ? (
         <div
-          title={img.class_ids.map((id) => classById.get(id)?.name).filter(Boolean).join(', ')}
+          title={img.annotations.map(ann => ann.text_content).filter(Boolean).join(', ')}
           style={{
             position: 'absolute',
             bottom: 4,
@@ -157,29 +157,67 @@ export const ImageTile: React.FC<ImageTileProps> = ({
             zIndex: 3,
           }}
         >
-          {img.class_ids.map((id, index) => {
-            const cls = classById.get(id);
-            if (!cls) return null;
+          {img.annotations.map((ann, index) => {
+            if (ann.type !== 'text_rec' || !ann.text_content) return null;
             return (
               <span
-                key={`${id}-${index}`}
+                key={`${ann.id}-${index}`}
                 style={{
-                  fontSize: '9px',
-                  fontWeight: 600,
-                  padding: '1px 4px',
-                  borderRadius: 3,
+                  fontSize: '12px',
+                  fontWeight: 'bold',
+                  padding: '3px 8px',
+                  borderRadius: 4,
                   color: '#fff',
-                  background: cls.color || '#999',
+                  background: '#6366F1',
                   whiteSpace: 'nowrap',
-                  textShadow: '0 1px 1px rgba(0,0,0,0.3)',
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                  textShadow: '0 1px 1px rgba(0,0,0,0.2)',
+                  boxShadow: '0 1px 4px rgba(0,0,0,0.25)',
                 }}
               >
-                {cls.name}
+                {ann.text_content}
               </span>
             );
           })}
         </div>
+      ) : (
+        img.class_ids && img.class_ids.length > 0 && (
+          <div
+            title={img.class_ids.map((id) => classById.get(id)?.name).filter(Boolean).join(', ')}
+            style={{
+              position: 'absolute',
+              bottom: 4,
+              left: 4,
+              right: img.completed_at ? 78 : 32,
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: 3,
+              zIndex: 3,
+            }}
+          >
+            {img.class_ids.map((id, index) => {
+              const cls = classById.get(id);
+              if (!cls) return null;
+              return (
+                <span
+                  key={`${id}-${index}`}
+                  style={{
+                    fontSize: '9px',
+                    fontWeight: 600,
+                    padding: '1px 4px',
+                    borderRadius: 3,
+                    color: '#fff',
+                    background: cls.color || '#999',
+                    whiteSpace: 'nowrap',
+                    textShadow: '0 1px 1px rgba(0,0,0,0.3)',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                  }}
+                >
+                  {cls.name}
+                </span>
+              );
+            })}
+          </div>
+        )
       )}
     </Link>
   );

@@ -1,4 +1,4 @@
-import type { Annotation, AssignmentCandidate, AutoLabelJob, ClassLabel, DashboardOverview, ImageItem, ImageWithAnnotations, ModelInfo, Project, ProjectAssignmentSummary, ProjectDashboardData, RecentActivityItem, SuggestedBox, TimelineReportItem, User, UserReportItem, ValidateResult } from './types';
+import type { Annotation, AssignmentCandidate, AutoLabelJob, ClassLabel, DashboardOverview, ImageItem, ImageWithAnnotations, ModelInfo, Project, ProjectAssignmentSummary, ProjectDashboardData, ProjectStatus, RecentActivityItem, SuggestedBox, TimelineReportItem, User, UserReportItem, ValidateResult } from './types';
 
 
 // ── Token helpers ──────────────────────────────────────────────────────────────
@@ -92,9 +92,11 @@ export const api = {
   deleteUser: (id: number) => request<void>(`/api/users/${id}`, { method: 'DELETE' }),
 
   listProjects: () => request<Project[]>('/api/projects'),
-  createProject: (name: string, description: string) =>
-    request<Project>('/api/projects', { method: 'POST', body: JSON.stringify({ name, description }) }),
+  createProject: (name: string, description: string, label_type?: string) =>
+    request<Project>('/api/projects', { method: 'POST', body: JSON.stringify({ name, description, label_type }) }),
   getProject: (id: string) => request<Project>(`/api/projects/${id}`),
+  updateProject: (id: string, patch: { name?: string; description?: string; status?: ProjectStatus; label_type?: string }) =>
+    request<Project>(`/api/projects/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   deleteProject: (id: string) => request<void>(`/api/projects/${id}`, { method: 'DELETE' }),
 
   listClasses: (projectId: string) => request<ClassLabel[]>(`/api/projects/${projectId}/classes`),
@@ -187,7 +189,14 @@ export const api = {
 
   startAutoLabel: (
     projectId: string,
-    opts: { model_id: string; confidence: number; scope: 'all' | 'unlabeled' | 'selected'; overwrite: boolean; image_ids?: string[] }
+    opts: {
+      model_id: string;
+      confidence: number;
+      scope: 'all' | 'unlabeled' | 'selected';
+      overwrite: boolean;
+      image_ids?: string[];
+      model_mode?: 'both' | 'box_only' | 'class_only' | 'text_recognize';
+    }
   ) =>
     request<{ jobId: string; total: number }>(`/api/projects/${projectId}/auto-label`, {
       method: 'POST',

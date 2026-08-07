@@ -13,25 +13,13 @@ export default defineConfig({
     },
   },
   build: {
-    rollupOptions: {
-      output: {
-        manualChunks(id) {
-          if (id.includes('node_modules')) {
-            if (id.includes('recharts')) {
-              return 'vendor-recharts';
-            }
-            if (id.includes('lucide-react')) {
-              return 'vendor-icons';
-            }
-            if (id.includes('react-dom') || id.includes('react-router-dom') || id.includes('react')) {
-              return 'vendor-react';
-            }
-            return 'vendor-utils';
-          }
-        },
-      },
-    },
-    chunkSizeWarningLimit: 600,
+    // Khong tu chia manualChunks: cach chia truoc day dua tren id.includes('react')
+    // vo tinh gom ca cac goi phu thuoc cua recharts (react-redux, react-is, ...) vao
+    // chunk 'vendor-react' rieng, tao vong tham chieu voi chunk 'vendor-utils'
+    // (Circular chunk: vendor-utils -> vendor-react -> vendor-utils). Vong nay khien
+    // module bi truy cap truoc khi khoi tao luc runtime -> React khong mount duoc gi,
+    // trang trang. De Rollup tu quyet dinh chia chunk, tranh tao vong lap.
+    chunkSizeWarningLimit: 1000,
   },
   test: {
     globals: true,

@@ -18,6 +18,10 @@ if not exist "client\node_modules" (
 )
 
 echo [3/3] Build giao dien va khoi chay server...
+if exist "server\data\server.log" (
+  echo Cleaning old server logs...
+  del "server\data\server.log"
+)
 call npm run build --prefix client
 if not exist "client\dist" (
   echo Loi: build client that bai. Kiem tra log ben tren.

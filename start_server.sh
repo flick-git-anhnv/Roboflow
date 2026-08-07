@@ -30,6 +30,10 @@ if [ ! -d "client/node_modules" ]; then
 fi
 
 echo "[3/3] Build giao dien va khoi chay server..."
+if [ -f "server/data/server.log" ]; then
+  echo "Cleaning old server logs..."
+  rm "server/data/server.log"
+fi
 npm run build --prefix client
 
 if [ ! -d "client/dist" ]; then

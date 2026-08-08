@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { getCurrentUser, requestSamPolygon } from '../../api';
+import { getCurrentUser, requestSamPolygon, requestPromptAutoLabel } from '../../api';
 import type { ClassLabel, Point } from '../../types';
 import type { Box, DragMode, Handle, Tool } from './types';
 import { boundingRect, clamp, cloneBox, drawLabel, fuzzyMatch, HANDLE_SIZE, pointInPolygon } from './utils';
@@ -90,6 +90,26 @@ export default function AnnotatorPage() {
   const [switcherQuery, setSwitcherQuery] = useState('');
   const [switcherIdx, setSwitcherIdx] = useState(0);
   const switcherInputRef = useRef<HTMLInputElement>(null);
+
+  // Grounding DINO Prompt Modal
+  const [showPromptModal, setShowPromptModal] = useState(false);
+  const [promptText, setPromptText] = useState('car');
+  const [promptBusy, setPromptBusy] = useState(false);
+
+  const handleRunPromptAutoLabel = async () => {
+    if (!projectId || !promptText.trim()) return;
+    setPromptBusy(true);
+    try {
+      const res = await requestPromptAutoLabel(projectId, promptText.trim());
+      alert(res.message);
+      setShowPromptModal(false);
+      window.location.reload();
+    } catch (err: any) {
+      alert('Lỗi gán nhãn tự động: ' + err.message);
+    } finally {
+      setPromptBusy(false);
+    }
+  };
 
   // Core Data & API Hook
   const {
@@ -1017,6 +1037,7 @@ export default function AnnotatorPage() {
         onSubmitReview={handleSubmitReview}
         onApproveReview={handleApprove}
         onRejectReview={handleReject}
+        onOpenPromptModal={() => setShowPromptModal(true)}
       />
 
       <PrefillBanner
@@ -1218,6 +1239,33 @@ export default function AnnotatorPage() {
         currentImageId={imageId}
         onGoToImageId={goToImageId}
       />
+      {showPromptModal && (
+        <div className="modal-backdrop" onClick={() => setShowPromptModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 450 }}>
+            <h3 style={{ marginTop: 0 }}>💬 Grounding DINO Prompt Auto-Labeling</h3>
+            <p style={{ fontSize: 13, color: '#888' }}>
+              Nhập từ khóa mô tả đối tượng để AI tự động quét và gán nhãn cho toàn bộ ảnh chưa gán nhãn trong dự án.
+            </p>
+            <div style={{ margin: '15px 0' }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 5 }}>Text Prompt (VD: car, license plate, person):</label>
+              <input
+                type="text"
+                className="form-control"
+                value={promptText}
+                onChange={(e) => setPromptText(e.target.value)}
+                placeholder="Nhập tên đối tượng..."
+                style={{ width: '100%', padding: '8px 12px', fontSize: 14 }}
+              />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button className="btn btn-outline" onClick={() => setShowPromptModal(false)}>Hủy</button>
+              <button className="btn btn-primary" onClick={handleRunPromptAutoLabel} disabled={promptBusy}>
+                {promptBusy ? 'Đang tự động gán nhãn...' : '⚡ Khởi Chạy Auto-Label'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

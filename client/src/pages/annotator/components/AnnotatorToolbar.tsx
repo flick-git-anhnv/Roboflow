@@ -44,6 +44,7 @@ interface AnnotatorToolbarProps {
   onSubmitReview: () => void;
   onApproveReview: () => void;
   onRejectReview: () => void;
+  onOpenPromptModal?: () => void;
 }
 
 export const AnnotatorToolbar: React.FC<AnnotatorToolbarProps> = ({
@@ -80,6 +81,7 @@ export const AnnotatorToolbar: React.FC<AnnotatorToolbarProps> = ({
   onSubmitReview,
   onApproveReview,
   onRejectReview,
+  onOpenPromptModal,
 }) => {
   const isCopyPrevDisabled = !prevImageItem || prevImageItem.status === 'unlabeled' || copyingLabels;
 
@@ -175,9 +177,18 @@ export const AnnotatorToolbar: React.FC<AnnotatorToolbarProps> = ({
           title="AI Smart Polygon — Click 1 lần để SAM tự động phân vùng vật thể"
           style={{ background: tool === 'sam_smart_polygon' ? '#8b5cf6' : undefined, color: tool === 'sam_smart_polygon' ? '#fff' : undefined }}
         >
-          🪄 Smart SAM (AI)
+          🪄 Smart SAM
+        </button>
+        <button
+          className="tool-btn"
+          onClick={onOpenPromptModal}
+          title="Auto-Label hàng loạt bằng Text Prompt (Grounding DINO / Zero-shot)"
+          style={{ background: '#3b82f6', color: '#fff' }}
+        >
+          💬 Auto-Prompt
         </button>
       </div>
+
 
 
       {/* Copy/Dán 1 box đang chọn (Ctrl+C / Ctrl+V) */}

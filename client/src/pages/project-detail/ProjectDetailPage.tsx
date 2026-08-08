@@ -13,6 +13,10 @@ import ProjectDetailHeader from './components/ProjectDetailHeader';
 import ClassManagerPanel from './components/ClassManagerPanel';
 import ClassImportModal from './components/ClassImportModal';
 import ModelManagerModal from '../../components/ModelManagerModal';
+import DatasetVersionsModal from '../../components/DatasetVersionsModal';
+import ModelTrainingModal from '../../components/ModelTrainingModal';
+import WorkflowsModal from '../../components/WorkflowsModal';
+import { requestPromptAutoLabel } from '../../api';
 import UploadDropzone from './components/UploadDropzone';
 import ImageFilterBar from './components/ImageFilterBar';
 import BatchActionsBar from './components/BatchActionsBar';
@@ -40,6 +44,28 @@ export default function ProjectDetailPage() {
   const [validateOpen, setValidateOpen] = useState(false);
   const [assignmentOpen, setAssignmentOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [promptOpen, setPromptOpen] = useState(false);
+  const [versionsOpen, setVersionsOpen] = useState(false);
+  const [trainingOpen, setTrainingOpen] = useState(false);
+  const [workflowsOpen, setWorkflowsOpen] = useState(false);
+
+  const [promptText, setPromptText] = useState('car');
+  const [promptBusy, setPromptBusy] = useState(false);
+
+  const handleRunPrompt = async () => {
+    if (!projectId || !promptText.trim()) return;
+    setPromptBusy(true);
+    try {
+      const res = await requestPromptAutoLabel(projectId, promptText.trim());
+      showToast(res.message);
+      setPromptOpen(false);
+      load();
+    } catch (err: any) {
+      showToast('Lỗi Auto-Label: ' + err.message, true);
+    } finally {
+      setPromptBusy(false);
+    }
+  };
   const [gridSize, setGridSize] = useState<'small' | 'medium' | 'large'>(() => {
     try {
       const saved = localStorage.getItem('project_grid_size');
@@ -156,19 +182,23 @@ export default function ProjectDetailPage() {
 
   return (
     <div className="project-detail-container">
-      <ProjectDetailHeader
-        project={project}
-        fileInputRef={fileInputRef}
-        folderInputRef={folderInputRef}
-        zipInputRef={zipInputRef}
-        onOpenStats={() => setStatsOpen(true)}
-        onOpenAutoLabel={() => setAutoLabelOpen(true)}
-        onOpenModelManager={() => setModelManagerOpen(true)}
-        onOpenValidate={() => setValidateOpen(true)}
-        onOpenAssignment={() => setAssignmentOpen(true)}
-        onOpenExport={() => setExportOpen(true)}
-        onHandleFiles={handleFiles}
-      />
+        <ProjectDetailHeader
+          project={project}
+          fileInputRef={fileInputRef}
+          folderInputRef={folderInputRef}
+          zipInputRef={zipInputRef}
+          onOpenStats={() => setStatsOpen(true)}
+          onOpenAutoLabel={() => setAutoLabelOpen(true)}
+          onOpenPromptModal={() => setPromptOpen(true)}
+          onOpenVersions={() => setVersionsOpen(true)}
+          onOpenTraining={() => setTrainingOpen(true)}
+          onOpenWorkflows={() => setWorkflowsOpen(true)}
+          onOpenModelManager={() => setModelManagerOpen(true)}
+          onOpenValidate={() => setValidateOpen(true)}
+          onOpenAssignment={() => setAssignmentOpen(true)}
+          onOpenExport={() => setExportOpen(true)}
+          onHandleFiles={handleFiles}
+        />
 
       <div className="detail-layout">
         <div className="side-panel">
@@ -312,6 +342,37 @@ export default function ProjectDetailPage() {
           onShowToast={showToast}
           onClose={() => setModelManagerOpen(false)}
         />
+      )}
+
+      {versionsOpen && project && <DatasetVersionsModal projectId={project.id} onClose={() => setVersionsOpen(false)} />}
+      {trainingOpen && project && <ModelTrainingModal projectId={project.id} onClose={() => setTrainingOpen(false)} />}
+      {workflowsOpen && project && <WorkflowsModal projectId={project.id} onClose={() => setWorkflowsOpen(false)} />}
+      {promptOpen && project && (
+        <div className="modal-backdrop" onClick={() => setPromptOpen(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 450 }}>
+            <h3 style={{ marginTop: 0 }}>💬 Grounding DINO Prompt Auto-Labeling</h3>
+            <p style={{ fontSize: 13, color: '#888' }}>
+              Nhập từ khóa mô tả đối tượng để AI tự động quét và gán nhãn cho toàn bộ ảnh chưa gán nhãn trong dự án.
+            </p>
+            <div style={{ margin: '15px 0' }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 5 }}>Text Prompt (VD: car, license plate, person):</label>
+              <input
+                type="text"
+                className="form-control"
+                value={promptText}
+                onChange={(e) => setPromptText(e.target.value)}
+                placeholder="Nhập tên đối tượng..."
+                style={{ width: '100%', padding: '8px 12px', fontSize: 14 }}
+              />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button className="btn btn-outline" onClick={() => setPromptOpen(false)}>Hủy</button>
+              <button className="btn btn-primary" onClick={handleRunPrompt} disabled={promptBusy}>
+                {promptBusy ? 'Đang tự động gán nhãn...' : '⚡ Khởi Chạy Auto-Label'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {toast && <div className={`toast ${toast.error ? 'error' : ''}`}>{toast.text}</div>}

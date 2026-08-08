@@ -8,6 +8,10 @@ interface ProjectDetailHeaderProps {
   zipInputRef: RefObject<HTMLInputElement>;
   onOpenStats: () => void;
   onOpenAutoLabel: () => void;
+  onOpenPromptModal?: () => void;
+  onOpenVersions?: () => void;
+  onOpenTraining?: () => void;
+  onOpenWorkflows?: () => void;
   onOpenModelManager: () => void;
   onOpenValidate: () => void;
   onOpenAssignment: () => void;
@@ -22,6 +26,10 @@ export const ProjectDetailHeader: React.FC<ProjectDetailHeaderProps> = ({
   zipInputRef,
   onOpenStats,
   onOpenAutoLabel,
+  onOpenPromptModal,
+  onOpenVersions,
+  onOpenTraining,
+  onOpenWorkflows,
   onOpenModelManager,
   onOpenValidate,
   onOpenAssignment,
@@ -34,9 +42,13 @@ export const ProjectDetailHeader: React.FC<ProjectDetailHeaderProps> = ({
         <h1>{project.name}</h1>
         <p style={{ margin: '4px 0 0', color: '#666', fontSize: 13 }}>{project.description}</p>
       </div>
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <button className="btn btn-outline" onClick={onOpenStats}>📊 Thống kê</button>
         <button className="btn btn-outline" onClick={onOpenAutoLabel}>🤖 Auto Label</button>
+        <button className="btn btn-outline" onClick={onOpenPromptModal} style={{ background: '#3b82f6', color: '#fff', border: 'none' }}>💬 Auto-Prompt</button>
+        <button className="btn btn-outline" onClick={onOpenVersions}>📦 Phiên bản</button>
+        <button className="btn btn-outline" onClick={onOpenTraining} style={{ background: '#8b5cf6', color: '#fff', border: 'none' }}>🚀 Train Model</button>
+        <button className="btn btn-outline" onClick={onOpenWorkflows}>🔀 Workflows</button>
         <button className="btn btn-outline" onClick={onOpenModelManager}>⚙ Quản lý Model</button>
         <button className="btn btn-outline" onClick={onOpenValidate}>Kiểm tra dataset</button>
         <button className="btn btn-outline" onClick={onOpenAssignment}>👥 Phân công</button>

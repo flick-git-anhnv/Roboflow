@@ -354,3 +354,30 @@ export interface ProjectStats {
   bySplit: { train: number; valid: number; test: number };
   perClass: { class_id: string; name: string; color: string; count: number }[];
 }
+
+export async function requestSamPolygon(projectId: string, imageId: string, pointPrompt: [number, number], simplification = 0.5) {
+  return request<{
+    success: boolean;
+    polygon: { x: number; y: number }[];
+    bbox: { x: number; y: number; width: number; height: number };
+    confidence: number;
+    source: string;
+  }>(`/api/projects/${projectId}/auto-label/sam`, {
+    method: 'POST',
+    body: JSON.stringify({ imageId, pointPrompt, clickType: 'positive', simplification })
+  });
+}
+
+export async function requestPromptAutoLabel(projectId: string, textPrompt: string, confidenceThreshold = 0.5, classId?: string) {
+  return request<{
+    success: boolean;
+    prompt: string;
+    imagesProcessed: number;
+    annotationsCreated: number;
+    message: string;
+  }>(`/api/projects/${projectId}/auto-label/prompt`, {
+    method: 'POST',
+    body: JSON.stringify({ textPrompt, confidenceThreshold, classId })
+  });
+}
+

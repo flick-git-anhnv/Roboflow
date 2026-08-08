@@ -160,16 +160,25 @@ export const AnnotatorToolbar: React.FC<AnnotatorToolbarProps> = ({
           onClick={() => { onSetTool('bbox'); onCancelDrawing(); }}
           title="Kéo thả để vẽ khung chữ nhật"
         >
-          ▭ Kéo thả (Box)
+          ▭ Box
         </button>
         <button
           className={`tool-btn ${tool === 'quad' ? 'active' : ''}`}
           onClick={() => onSetTool('quad')}
           title="Chấm 4 điểm — phù hợp cho biển số bị xiên/nghiêng"
         >
-          ◈ Chấm 4 điểm (Quad)
+          ◈ Quad
+        </button>
+        <button
+          className={`tool-btn ${tool === 'sam_smart_polygon' ? 'active' : ''}`}
+          onClick={() => onSetTool('sam_smart_polygon')}
+          title="AI Smart Polygon — Click 1 lần để SAM tự động phân vùng vật thể"
+          style={{ background: tool === 'sam_smart_polygon' ? '#8b5cf6' : undefined, color: tool === 'sam_smart_polygon' ? '#fff' : undefined }}
+        >
+          🪄 Smart SAM (AI)
         </button>
       </div>
+
 
       {/* Copy/Dán 1 box đang chọn (Ctrl+C / Ctrl+V) */}
       <div style={{ display: 'flex', gap: 4 }}>

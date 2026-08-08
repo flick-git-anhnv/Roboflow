@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { getCurrentUser } from '../../api';
+import { getCurrentUser, requestSamPolygon } from '../../api';
 import type { ClassLabel, Point } from '../../types';
 import type { Box, DragMode, Handle, Tool } from './types';
 import { boundingRect, clamp, cloneBox, drawLabel, fuzzyMatch, HANDLE_SIZE, pointInPolygon } from './utils';
@@ -293,20 +293,21 @@ export default function AnnotatorPage() {
       const isSelected = isPrimary || isMultiSelected;
       const showHandles = isPrimary;
 
-      if (b.type === 'quad' && b.points) {
+      if ((b.type === 'quad' || b.type === 'sam_smart_polygon') && b.points) {
         const pts = b.points.map((p) => ({ x: p.x * s, y: p.y * s }));
         ctx.beginPath();
         pts.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
         ctx.closePath();
         ctx.lineWidth = isSelected ? 3 : 2;
-        ctx.strokeStyle = color;
+        ctx.strokeStyle = b.source === 'sam_smart_polygon' ? '#8b5cf6' : color;
         if (isMultiSelected && !isPrimary) ctx.setLineDash([6, 3]);
         ctx.stroke();
         ctx.setLineDash([]);
-        ctx.fillStyle = color + '33';
+        ctx.fillStyle = b.source === 'sam_smart_polygon' ? 'rgba(139, 92, 246, 0.25)' : color + '33';
         ctx.fill();
 
-        drawLabel(ctx, cls?.name || '?', color, pts[0].x, pts[0].y);
+        const labelName = b.source === 'sam_smart_polygon' ? `🟣 ${cls?.name || 'SAM'}` : (cls?.name || '?');
+        drawLabel(ctx, labelName, b.source === 'sam_smart_polygon' ? '#8b5cf6' : color, pts[0].x, pts[0].y);
 
         if (showHandles) {
           ctx.fillStyle = color;
@@ -517,6 +518,37 @@ export default function AnnotatorPage() {
 
     selectOnly(null);
     if (!activeClassId) return;
+    if (tool === 'sam_smart_polygon') {
+      if (!projectId || !imageId || !image?.width || !image?.height) return;
+      const normX = x / image.width;
+      const normY = y / image.height;
+      requestSamPolygon(projectId, imageId, [normX, normY])
+        .then((res) => {
+          if (res.success && res.polygon) {
+            const polyPoints: Point[] = res.polygon.map((p) => ({
+              x: Number((p.x * image.width).toFixed(2)),
+              y: Number((p.y * image.height).toFixed(2)),
+            }));
+            const br = boundingRect(polyPoints as [Point, Point, Point, Point]);
+            const newBox: Box = {
+              id: `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+              class_id: activeClassId,
+              type: 'sam_smart_polygon',
+              x: br.x,
+              y: br.y,
+              w: br.w,
+              h: br.h,
+              points: polyPoints,
+              source: 'sam_smart_polygon',
+            };
+            setBoxes((prev) => [...prev, newBox]);
+          }
+        })
+        .catch((err) => {
+          console.error('[sam_polygon] Failed to generate polygon:', err);
+        });
+      return;
+    }
     if (tool === 'quad') {
       setDrawingPoints([{ x, y }]);
       return;

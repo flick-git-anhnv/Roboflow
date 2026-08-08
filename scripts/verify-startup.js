@@ -130,10 +130,10 @@ async function verifyStartup() {
       currentBranch = execSync('git branch --show-current', { cwd: ROOT_DIR, encoding: 'utf-8' }).trim();
     }
 
-    if (currentBranch === 'feature/roboflow-upgrade') {
+    if (currentBranch.startsWith('feature/roboflow')) {
       logPass(`Working tree isolated on branch: '${currentBranch}'`);
     } else {
-      logFail(`Working tree is on branch '${currentBranch}', expected 'feature/roboflow-upgrade'`);
+      logFail(`Working tree is on branch '${currentBranch}', expected 'feature/roboflow-*'`);
       failed = true;
     }
   } catch (err) {

@@ -73,7 +73,7 @@ export interface ImageItem {
   annotations?: Annotation[];
 }
 
-export type AnnotationType = 'bbox' | 'quad' | 'classify' | 'text_rec';
+export type AnnotationType = 'bbox' | 'quad' | 'classify' | 'text_rec' | 'sam_smart_polygon';
 
 export interface Point {
   x: number;
@@ -89,9 +89,11 @@ export interface Annotation {
   w: number;
   h: number;
   type: AnnotationType;
-  points: [Point, Point, Point, Point] | null;
+  points: Point[] | null;
   text_content?: string | null;
+  source?: 'manual' | 'sam_smart_polygon' | 'auto_prompt';
 }
+
 
 export interface ImageWithAnnotations extends ImageItem {
   annotations: Annotation[];

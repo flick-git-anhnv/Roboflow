@@ -392,7 +392,7 @@ export default function AnnotatorPage() {
         ctx.fill();
       }
     }
-  }, [boxes, image, imgEl, selectedId, selectedIds, selectRect, classById, drawingPoints, mousePos, activeClassId, zoom]);
+  }, [boxes, image, imgEl, selectedId, selectedIds, hoveredId, spotlightEnabled, selectRect, classById, drawingPoints, mousePos, activeClassId, zoom]);
 
   useEffect(() => { draw(); }, [draw]);
 

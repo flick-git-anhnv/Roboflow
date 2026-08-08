@@ -348,27 +348,36 @@ export default function ProjectDetailPage() {
       {trainingOpen && project && <ModelTrainingModal projectId={project.id} onClose={() => setTrainingOpen(false)} />}
       {workflowsOpen && project && <WorkflowsModal projectId={project.id} onClose={() => setWorkflowsOpen(false)} />}
       {promptOpen && project && (
-        <div className="modal-backdrop" onClick={() => setPromptOpen(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 450 }}>
-            <h3 style={{ marginTop: 0 }}>💬 Grounding DINO Prompt Auto-Labeling</h3>
-            <p style={{ fontSize: 13, color: '#888' }}>
-              Nhập từ khóa mô tả đối tượng để AI tự động quét và gán nhãn cho toàn bộ ảnh chưa gán nhãn trong dự án.
+        <div className="modal-backdrop" onClick={() => setPromptOpen(false)} style={{ backdropFilter: 'blur(8px)', background: 'rgba(15, 23, 42, 0.75)' }}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{
+            maxWidth: 480, width: '92%', borderRadius: 16, border: '1px solid rgba(255,255,255,0.15)',
+            boxShadow: '0 25px 60px rgba(0,0,0,0.6)', padding: 24, background: '#1e293b', color: '#f8fafc'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: 12 }}>
+              <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>💬 Grounding DINO Prompt Auto-Labeling</h3>
+              <button className="btn btn-outline" onClick={() => setPromptOpen(false)} style={{ borderRadius: 8, padding: '2px 8px', borderColor: '#475569', color: '#cbd5e1' }}>✕</button>
+            </div>
+            <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 10, lineHeight: 1.5 }}>
+              Nhập từ khóa mô tả đối tượng. AI Zero-shot Detection sẽ tự động quét và sinh khung nhãn cho toàn bộ ảnh trong dự án.
             </p>
-            <div style={{ margin: '15px 0' }}>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 5 }}>Text Prompt (VD: car, license plate, person):</label>
+            <div style={{ margin: '16px 0' }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 6, color: '#cbd5e1' }}>Text Prompt (VD: car, license plate, person):</label>
               <input
                 type="text"
                 className="form-control"
                 value={promptText}
                 onChange={(e) => setPromptText(e.target.value)}
-                placeholder="Nhập tên đối tượng..."
-                style={{ width: '100%', padding: '8px 12px', fontSize: 14 }}
+                placeholder="Nhập tên đối tượng (VD: car)..."
+                style={{ width: '100%', padding: '10px 14px', borderRadius: 8, background: '#0f172a', border: '1px solid #334155', color: '#fff', fontSize: 14 }}
               />
             </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <button className="btn btn-outline" onClick={() => setPromptOpen(false)}>Hủy</button>
-              <button className="btn btn-primary" onClick={handleRunPrompt} disabled={promptBusy}>
-                {promptBusy ? 'Đang tự động gán nhãn...' : '⚡ Khởi Chạy Auto-Label'}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button className="btn btn-outline" onClick={() => setPromptOpen(false)} style={{ borderRadius: 8, padding: '8px 16px', borderColor: '#475569', color: '#cbd5e1' }}>Hủy</button>
+              <button className="btn btn-primary" onClick={handleRunPrompt} disabled={promptBusy} style={{
+                background: 'linear-gradient(135deg, #2563eb, #7c3aed)', border: 'none',
+                borderRadius: 8, padding: '8px 20px', fontWeight: 600, fontSize: 13
+              }}>
+                {promptBusy ? '⚡ AI Đang quét & gán nhãn...' : '⚡ Khởi Chạy Auto-Label'}
               </button>
             </div>
           </div>

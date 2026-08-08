@@ -381,3 +381,57 @@ export async function requestPromptAutoLabel(projectId: string, textPrompt: stri
   });
 }
 
+// ─── M2: Dataset Versions & Preprocessing API ─────────────────────────────────
+export async function getDatasetVersions(projectId: string) {
+  return request<{ success: boolean; versions: any[] }>(`/api/projects/${projectId}/versions`);
+}
+
+export async function createDatasetVersion(projectId: string, payload: {
+  versionName: string;
+  trainSplit?: number;
+  valSplit?: number;
+  testSplit?: number;
+  augmentationConfig?: Record<string, any>;
+  preprocessingConfig?: Record<string, any>;
+}) {
+  return request<{ success: boolean; version: any; message: string }>(`/api/projects/${projectId}/versions`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+// ─── M3: Model Training Hub API ───────────────────────────────────────────────
+export async function getTrainingJobs(projectId: string) {
+  return request<{ success: boolean; jobs: any[] }>(`/api/projects/${projectId}/train/jobs`);
+}
+
+export async function startTrainingJob(projectId: string, payload: {
+  datasetVersionId: string;
+  architecture?: string;
+  epochs?: number;
+  batchSize?: number;
+}) {
+  return request<{ success: boolean; job: any; message: string }>(`/api/projects/${projectId}/train/start`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+// ─── M4: Visual CV Workflows API ──────────────────────────────────────────────
+export async function getCVWorkflows(projectId: string) {
+  return request<{ success: boolean; workflows: any[] }>(`/api/projects/${projectId}/workflows`);
+}
+
+export async function createCVWorkflow(projectId: string, payload: {
+  name: string;
+  graphNodes?: any[];
+  graphEdges?: any[];
+  isActive?: boolean;
+}) {
+  return request<{ success: boolean; workflow: any; message: string }>(`/api/projects/${projectId}/workflows`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+

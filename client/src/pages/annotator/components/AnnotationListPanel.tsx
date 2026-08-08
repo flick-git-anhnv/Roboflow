@@ -9,8 +9,10 @@ interface AnnotationListPanelProps {
   classById: Map<string, ClassLabel>;
   selectedId: string | null;
   selectedIds: Set<string>;
+  hoveredId?: string | null;
   onSelectOnly: (id: string | null) => void;
   onUpdateBoxes: (updater: (prev: Box[]) => Box[]) => void;
+  onHoverBox?: (id: string | null) => void;
 }
 
 export const AnnotationListPanel: React.FC<AnnotationListPanelProps> = ({
@@ -18,8 +20,10 @@ export const AnnotationListPanel: React.FC<AnnotationListPanelProps> = ({
   classById,
   selectedId,
   selectedIds,
+  hoveredId,
   onSelectOnly,
   onUpdateBoxes,
+  onHoverBox,
 }) => {
   const visibleBoxes = boxes.filter((b) => b.id !== DRAWING_ID);
 
@@ -29,13 +33,22 @@ export const AnnotationListPanel: React.FC<AnnotationListPanelProps> = ({
       <div className="class-list-scroll">
         {visibleBoxes.map((b) => {
           const cls = classById.get(b.class_id);
+          const isHovered = hoveredId === b.id;
+          const isSelected = selectedId === b.id || selectedIds.has(b.id);
           return (
-            <div key={b.id} className="annotation-list-row"
+            <div key={b.id} className={`annotation-list-row ${isHovered ? 'hovered' : ''}`}
               onClick={() => onSelectOnly(b.id)}
-              style={{ outline: (selectedId === b.id || selectedIds.has(b.id)) ? `1px solid ${cls?.color}` : 'none' }}>
+              onMouseEnter={() => onHoverBox?.(b.id)}
+              onMouseLeave={() => onHoverBox?.(null)}
+              style={{
+                outline: isSelected ? `2px solid ${cls?.color || '#F05922'}` : isHovered ? '1px dashed #8b5cf6' : 'none',
+                background: isHovered ? 'rgba(139, 92, 246, 0.15)' : undefined
+              }}>
               <span className="swatch" style={{ background: cls?.color }} />
               <span>{cls?.name}</span>
-              <span className="shape-tag">{b.type === 'quad' ? '◈ 4 điểm' : '▭ box'}</span>
+              <span className="shape-tag">
+                {b.type === 'sam_smart_polygon' ? '🟣 SAM' : b.type === 'quad' ? '◈ 4 điểm' : '▭ box'}
+              </span>
               <button onClick={(e) => {
                 e.stopPropagation();
                 onUpdateBoxes((prev) => prev.filter((x) => x.id !== b.id));
@@ -49,5 +62,6 @@ export const AnnotationListPanel: React.FC<AnnotationListPanelProps> = ({
     </div>
   );
 };
+
 
 export default AnnotationListPanel;

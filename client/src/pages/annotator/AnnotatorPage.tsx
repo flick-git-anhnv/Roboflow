@@ -32,6 +32,8 @@ export default function AnnotatorPage() {
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [spotlightEnabled, setSpotlightEnabled] = useState<boolean>(true);
 
   const selectOnly = useCallback((id: string | null) => {
     setSelectedId(id);
@@ -284,6 +286,28 @@ export default function AnnotatorPage() {
     if (!ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(el, 0, 0, canvas.width, canvas.height);
+
+    // Roboflow Focus Spotlight Mode: Dim outer image canvas when hovering over a box
+    const activeTargetId = hoveredId || (selectedId && selectedIds.size <= 1 ? selectedId : null);
+    const hoveredBox = (spotlightEnabled && activeTargetId) ? boxes.find((b) => b.id === activeTargetId && b.id !== DRAWING_ID) : null;
+
+    if (hoveredBox) {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.save();
+      ctx.beginPath();
+      if ((hoveredBox.type === 'quad' || hoveredBox.type === 'sam_smart_polygon') && hoveredBox.points) {
+        const pts = hoveredBox.points.map((p) => ({ x: p.x * s, y: p.y * s }));
+        pts.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+        ctx.closePath();
+      } else {
+        ctx.rect(hoveredBox.x * s, hoveredBox.y * s, hoveredBox.w * s, hoveredBox.h * s);
+      }
+      ctx.clip();
+      ctx.drawImage(el, 0, 0, canvas.width, canvas.height);
+      ctx.restore();
+    }
 
     for (const b of boxes) {
       const cls = classById.get(b.class_id);
@@ -573,15 +597,18 @@ export default function AnnotatorPage() {
 
     if (!spaceHeld && !isPanning && canvasRef.current) {
       let cursor = 'crosshair';
+      const hit = hitTestBox(pos.x, pos.y);
+      setHoveredId(hit ? hit.id : null);
+
       const sel = selectedId ? boxes.find((b) => b.id === selectedId) : null;
       if (sel) {
         const handle = hitTestHandle(sel, pos.x, pos.y);
         if (handle !== null) {
           cursor = typeof handle === 'number' ? 'pointer' : (HANDLE_CURSOR[handle] || 'pointer');
-        } else if (hitTestBox(pos.x, pos.y)) {
+        } else if (hit) {
           cursor = 'move';
         }
-      } else if (hitTestBox(pos.x, pos.y)) {
+      } else if (hit) {
         cursor = 'move';
       }
       canvasRef.current.style.cursor = cursor;
@@ -1033,7 +1060,13 @@ export default function AnnotatorPage() {
           containerRef={containerRef}
           canvasRef={canvasRef}
           onMouseDown={onMouseDown}
-          onMouseMove={onMouseMove}
+          onMouseMove={(e) => {
+             onMouseMove(e);
+             if (spotlightEnabled) {
+               // Logic to detect box under cursor to setHoveredId
+             }
+          }}
+          onMouseLeave={() => setHoveredId(null)}
           onContextMenu={(e) => { e.preventDefault(); if (drawingPoints.length > 0) undoLastPoint(); }}
         />
 
@@ -1043,8 +1076,10 @@ export default function AnnotatorPage() {
             classById={classById}
             selectedId={selectedId}
             selectedIds={selectedIds}
+            hoveredId={hoveredId}
             onSelectOnly={selectOnly}
             onUpdateBoxes={updateBoxes}
+            onHoverBox={setHoveredId}
           />
         )}
 

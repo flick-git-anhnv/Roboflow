@@ -29,6 +29,9 @@ import prefillRouter from './routes/prefill.js';
 import validateRouter from './routes/validate.js';
 import assignmentsRouter from './routes/assignments.js';
 import dashboardRouter from './routes/dashboard.js';
+import versionsRouter from './routes/versions.js';
+import trainingRouter from './routes/training.js';
+import workflowsRouter from './routes/workflows.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const app = express();
@@ -107,6 +110,9 @@ app.use('/api/projects/:projectId/activity', checkProjectAssignment, activityRou
 app.use('/api/projects/:projectId', checkProjectAssignment, prefillRouter);
 app.use('/api/projects/:projectId', checkProjectAssignment, validateRouter);
 app.use('/api/projects/:projectId/assignments', checkProjectAssignment, assignmentsRouter);
+app.use('/api/projects/:projectId/versions', checkProjectAssignment, versionsRouter);
+app.use('/api/projects/:projectId/train', checkProjectAssignment, trainingRouter);
+app.use('/api/projects/:projectId/workflows', checkProjectAssignment, workflowsRouter);
 
 // ─── SPA fallback & error handling ───────────────────────────────────────────
 const clientDist = path.join(__dirname, '..', '..', 'client', 'dist');

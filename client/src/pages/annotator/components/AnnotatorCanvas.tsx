@@ -8,6 +8,7 @@ interface AnnotatorCanvasProps {
   canvasRef: RefObject<HTMLCanvasElement>;
   onMouseDown: (e: React.MouseEvent) => void;
   onMouseMove: (e: React.MouseEvent) => void;
+  onMouseLeave?: (e: React.MouseEvent) => void;
   onContextMenu: (e: React.MouseEvent) => void;
 }
 
@@ -19,6 +20,7 @@ export const AnnotatorCanvas: React.FC<AnnotatorCanvasProps> = ({
   canvasRef,
   onMouseDown,
   onMouseMove,
+  onMouseLeave,
   onContextMenu,
 }) => {
   return (
@@ -31,10 +33,12 @@ export const AnnotatorCanvas: React.FC<AnnotatorCanvasProps> = ({
         ref={canvasRef}
         onMouseDown={onMouseDown}
         onMouseMove={onMouseMove}
+        onMouseLeave={onMouseLeave}
         onContextMenu={onContextMenu}
       />
     </div>
   );
 };
+
 
 export default AnnotatorCanvas;

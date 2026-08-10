@@ -176,7 +176,10 @@ export default function AnnotatorPage() {
 
   // Image Element loading effect
   useEffect(() => {
-    if (!projectId || !image) return;
+    if (!projectId || !image) {
+      setImgEl(null);
+      return;
+    }
     let cancelled = false;
     selectOnly(null);
     setDrawingPoints([]);

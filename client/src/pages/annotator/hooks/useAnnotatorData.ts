@@ -58,6 +58,8 @@ export function useAnnotatorData(
 
     let cancelled = false;
 
+    setImage(null);
+    setBoxes([]);
     setPrefillLoading(false);
     setPrefillCount(0);
     if (onClearHistory) onClearHistory();

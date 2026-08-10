@@ -49,6 +49,16 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 
   // 401 → clear local auth and redirect to /login (interceptor)
   if (res.status === 401) {
+    if (url.includes('/api/auth/login')) {
+      let message = 'AUTH_INVALID_CREDENTIALS';
+      try {
+        const data = await res.json();
+        message = data.error || message;
+      } catch {
+        // ignore
+      }
+      throw new Error(message);
+    }
     clearAuth();
     if (!window.location.pathname.startsWith('/login')) {
       window.location.replace('/login?reason=session_expired');

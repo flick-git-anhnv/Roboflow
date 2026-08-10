@@ -82,7 +82,7 @@ export const ClassDistributionChart: React.FC<ClassDistributionChartProps> = ({
         <div className="chart-card-header">
           <h3 className="chart-card-title" style={{ fontFamily: 'Inter, system-ui, sans-serif' }}>{displayTitle}</h3>
         </div>
-        <div className="chart-empty" style={{ fontFamily: 'Inter, system-ui, sans-serif' }}>Chưa có dữ liệu thống kê.</div>
+        <div className="chart-empty" style={{ fontFamily: 'Inter, system-ui, sans-serif' }}>Chưa có dữ liệu class annotation.</div>
       </div>
     );
   }

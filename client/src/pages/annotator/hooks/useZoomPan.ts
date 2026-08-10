@@ -16,6 +16,15 @@ export function useZoomPan(
 
   const setZoomClamped = (z: number) => setZoom(clamp(z, 1, 8));
 
+  // Reset zoom and scroll on image change
+  useEffect(() => {
+    setZoom(1);
+    if (containerRef.current) {
+      containerRef.current.scrollLeft = 0;
+      containerRef.current.scrollTop = 0;
+    }
+  }, [image?.id, containerRef]);
+
   // Non-passive wheel event listener
   useEffect(() => {
     const container = containerRef.current;
@@ -23,16 +32,24 @@ export function useZoomPan(
     const handler = (e: WheelEvent) => {
       e.preventDefault();
       const rect = container.getBoundingClientRect();
-      const contentX = e.clientX - rect.left + container.scrollLeft;
-      const contentY = e.clientY - rect.top + container.scrollTop;
+      const canvas = container.querySelector('canvas');
+      const canvasRect = canvas ? canvas.getBoundingClientRect() : rect;
+
+      const mouseCanvasX = e.clientX - canvasRect.left;
+      const mouseCanvasY = e.clientY - canvasRect.top;
+
+      const canvasViewportLeft = canvasRect.left - rect.left;
+      const canvasViewportTop = canvasRect.top - rect.top;
+
       const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
       const currentZoom = zoomRef.current;
       const newZoom = clamp(currentZoom * factor, 1, 8);
       if (newZoom === currentZoom) return;
+
       const ratio = newZoom / currentZoom;
       pendingScrollRef.current = {
-        left: contentX * ratio - (e.clientX - rect.left),
-        top: contentY * ratio - (e.clientY - rect.top),
+        left: mouseCanvasX * (ratio - 1) - canvasViewportLeft,
+        top: mouseCanvasY * (ratio - 1) - canvasViewportTop,
       };
       setZoom(newZoom);
     };
@@ -43,9 +60,15 @@ export function useZoomPan(
   // Apply pending scroll after zoom updates canvas
   useEffect(() => {
     if (pendingScrollRef.current && containerRef.current) {
-      containerRef.current.scrollLeft = pendingScrollRef.current.left;
-      containerRef.current.scrollTop = pendingScrollRef.current.top;
+      const left = pendingScrollRef.current.left;
+      const top = pendingScrollRef.current.top;
       pendingScrollRef.current = null;
+      requestAnimationFrame(() => {
+        if (containerRef.current) {
+          containerRef.current.scrollLeft = left;
+          containerRef.current.scrollTop = top;
+        }
+      });
     }
   }, [zoom, containerRef]);
 

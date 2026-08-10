@@ -288,12 +288,12 @@ export const api = {
   // ── Dashboard & Reports (Milestone 3) ─────────────────────────────────────
   getDashboardOverview: () =>
     request<DashboardOverview>('/api/dashboard/overview'),
-  getProjectDashboard: (projectId: string) =>
-    request<ProjectDashboardData>(`/api/projects/${projectId}/dashboard`),
-  getProjectUserReports: (projectId: string) =>
-    request<UserReportItem[]>(`/api/projects/${projectId}/reports/users`),
-  getProjectTimelineReports: (projectId: string, days = 30) =>
-    request<TimelineReportItem[]>(`/api/projects/${projectId}/reports/timeline?days=${days}`),
+  getProjectDashboard: (projectId: string, completedOnly: boolean = true) =>
+    request<ProjectDashboardData>(`/api/projects/${projectId}/dashboard?completedOnly=${completedOnly}`),
+  getProjectUserReports: (projectId: string, completedOnly: boolean = true) =>
+    request<UserReportItem[]>(`/api/projects/${projectId}/reports/users?completedOnly=${completedOnly}`),
+  getProjectTimelineReports: (projectId: string, days = 30, completedOnly: boolean = true) =>
+    request<TimelineReportItem[]>(`/api/projects/${projectId}/reports/timeline?days=${days}&completedOnly=${completedOnly}`),
   getReportExportUrl: (projectId: string, format: 'csv' | 'json' = 'csv') =>
     `/api/projects/${projectId}/reports/export?format=${format}`,
   downloadReport: async (projectId: string, format: 'csv' | 'json' = 'csv', projectName = 'project') => {

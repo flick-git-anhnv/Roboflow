@@ -16,15 +16,16 @@ export default function StatsPanel({ projectId, labelType, onClose }: { projectI
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'timeline' | 'team'>('overview');
+  const [completedOnly, setCompletedOnly] = useState<boolean>(true);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const [dashData, usersData, timelineData] = await Promise.all([
-        api.getProjectDashboard(projectId),
-        api.getProjectUserReports(projectId),
-        api.getProjectTimelineReports(projectId, days),
+        api.getProjectDashboard(projectId, completedOnly),
+        api.getProjectUserReports(projectId, completedOnly),
+        api.getProjectTimelineReports(projectId, days, completedOnly),
       ]);
       setDashboard(dashData);
       setUserReports(usersData);
@@ -34,7 +35,7 @@ export default function StatsPanel({ projectId, labelType, onClose }: { projectI
     } finally {
       setLoading(false);
     }
-  }, [projectId, days]);
+  }, [projectId, days, completedOnly]);
 
   useEffect(() => {
     loadData();
@@ -53,7 +54,15 @@ export default function StatsPanel({ projectId, labelType, onClose }: { projectI
             <span className="stats-project-id">ID: {projectId}</span>
           </div>
 
-          <div className="stats-modal-actions">
+          <div className="stats-modal-actions" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '14px', fontWeight: 500 }}>
+              <input
+                type="checkbox"
+                checked={completedOnly}
+                onChange={(e) => setCompletedOnly(e.target.checked)}
+              />
+              Chỉ tính các ảnh đã hoàn thành
+            </label>
             <button
               type="button"
               className="btn btn-secondary btn-icon"

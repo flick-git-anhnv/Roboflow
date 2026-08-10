@@ -99,6 +99,9 @@ router.get('/overview', (req, res) => {
 // ── 2. GET /api/projects/:projectId/dashboard ──────────────────────────────
 router.get('/:projectId/dashboard', checkProjectAssignment, (req, res) => {
   const { projectId } = req.params;
+  const completedOnly = req.query.completedOnly === 'true';
+  const imageFilter = completedOnly ? " AND i.completed_at IS NOT NULL" : "";
+  const baseImageFilter = completedOnly ? " AND completed_at IS NOT NULL" : "";
   try {
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId);
     if (!project) return res.status(404).json({ error: 'Không tìm thấy project' });
@@ -116,7 +119,7 @@ router.get('/:projectId/dashboard', checkProjectAssignment, (req, res) => {
 
     // Review Status Breakdown
     const reviewRows = db.prepare(`
-      SELECT review_status, COUNT(*) AS cnt FROM images WHERE project_id = ? GROUP BY review_status
+      SELECT review_status, COUNT(*) AS cnt FROM images WHERE project_id = ? ${baseImageFilter} GROUP BY review_status
     `).all(projectId);
     const reviewStatusBreakdown = { draft: 0, in_review: 0, approved: 0, rejected: 0 };
     for (const r of reviewRows) {
@@ -127,7 +130,7 @@ router.get('/:projectId/dashboard', checkProjectAssignment, (req, res) => {
 
     // Dataset Balance
     const splitRows = db.prepare(`
-      SELECT split, COUNT(*) AS cnt FROM images WHERE project_id = ? GROUP BY split
+      SELECT split, COUNT(*) AS cnt FROM images WHERE project_id = ? ${baseImageFilter} GROUP BY split
     `).all(projectId);
     const bySplit = { train: 0, valid: 0, test: 0 };
     for (const s of splitRows) {
@@ -141,7 +144,7 @@ router.get('/:projectId/dashboard', checkProjectAssignment, (req, res) => {
         SELECT a.class_id, a.text_content, a.type
         FROM annotations a
         JOIN images i ON i.id = a.image_id
-        WHERE i.project_id = ?
+        WHERE i.project_id = ? ${imageFilter}
       `).all(projectId);
 
       const charCounts = {};
@@ -183,19 +186,24 @@ router.get('/:projectId/dashboard', checkProjectAssignment, (req, res) => {
       perClass = db.prepare(`
         SELECT c.id AS class_id, c.name, c.color, COUNT(a.id) AS count
         FROM classes c
-        LEFT JOIN annotations a ON a.class_id = c.id
+        LEFT JOIN (
+           SELECT ann.id, ann.class_id 
+           FROM annotations ann 
+           JOIN images i ON i.id = ann.image_id
+           WHERE i.project_id = ? ${imageFilter}
+        ) a ON a.class_id = c.id
         WHERE c.project_id = ?
         GROUP BY c.id
         ORDER BY c.sort_order ASC
-      `).all(projectId);
+      `).all(projectId, projectId);
     }
 
     // User Productivity
     const userProductivity = db.prepare(`
       SELECT u.id AS userId, u.username, u.display_name AS displayName,
-        (SELECT COUNT(*) FROM images WHERE project_id = ? AND uploaded_by = u.id) AS imagesUploaded,
-        (SELECT COUNT(*) FROM images WHERE project_id = ? AND completed_by = u.id) AS imagesCompleted,
-        (SELECT COUNT(a.id) FROM annotations a JOIN images i ON i.id = a.image_id WHERE i.project_id = ? AND (i.completed_by = u.id OR i.uploaded_by = u.id)) AS annotationsCreated
+        (SELECT COUNT(*) FROM images WHERE project_id = ? AND uploaded_by = u.id ${baseImageFilter}) AS imagesUploaded,
+        (SELECT COUNT(*) FROM images WHERE project_id = ? AND completed_by = u.id ${baseImageFilter}) AS imagesCompleted,
+        (SELECT COUNT(a.id) FROM annotations a JOIN images i ON i.id = a.image_id WHERE i.project_id = ? AND (i.completed_by = u.id OR i.uploaded_by = u.id) ${imageFilter}) AS annotationsCreated
       FROM users u
       ORDER BY imagesCompleted DESC
     `).all(projectId, projectId, projectId);
@@ -218,15 +226,18 @@ router.get('/:projectId/dashboard', checkProjectAssignment, (req, res) => {
 // ── 3. GET /api/projects/:projectId/reports/users ──────────────────────────
 router.get('/:projectId/reports/users', checkProjectAssignment, (req, res) => {
   const { projectId } = req.params;
+  const completedOnly = req.query.completedOnly === 'true';
+  const baseImageFilter = completedOnly ? " AND completed_at IS NOT NULL" : "";
+  const imageFilter = completedOnly ? " AND i.completed_at IS NOT NULL" : "";
   try {
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId);
     if (!project) return res.status(404).json({ error: 'Không tìm thấy project' });
 
     const users = db.prepare(`
       SELECT u.id AS userId, u.username, u.display_name AS displayName, u.role,
-        (SELECT COUNT(*) FROM images WHERE project_id = ? AND uploaded_by = u.id) AS imagesUploaded,
-        (SELECT COUNT(*) FROM images WHERE project_id = ? AND completed_by = u.id) AS imagesCompleted,
-        (SELECT COUNT(a.id) FROM annotations a JOIN images i ON i.id = a.image_id WHERE i.project_id = ? AND (i.completed_by = u.id OR i.uploaded_by = u.id)) AS annotationsCount
+        (SELECT COUNT(*) FROM images WHERE project_id = ? AND uploaded_by = u.id ${baseImageFilter}) AS imagesUploaded,
+        (SELECT COUNT(*) FROM images WHERE project_id = ? AND completed_by = u.id ${baseImageFilter}) AS imagesCompleted,
+        (SELECT COUNT(a.id) FROM annotations a JOIN images i ON i.id = a.image_id WHERE i.project_id = ? AND (i.completed_by = u.id OR i.uploaded_by = u.id) ${imageFilter}) AS annotationsCount
       FROM users u
     `).all(projectId, projectId, projectId);
 
@@ -247,6 +258,9 @@ router.get('/:projectId/reports/users', checkProjectAssignment, (req, res) => {
 router.get('/:projectId/reports/timeline', checkProjectAssignment, (req, res) => {
   const { projectId } = req.params;
   const days = Math.min(365, Math.max(7, parseInt(req.query.days || '30', 10)));
+  const completedOnly = req.query.completedOnly === 'true';
+  const baseImageFilter = completedOnly ? " AND completed_at IS NOT NULL" : "";
+  const imageFilter = completedOnly ? " AND i.completed_at IS NOT NULL" : "";
 
   try {
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId);
@@ -268,7 +282,7 @@ router.get('/:projectId/reports/timeline', checkProjectAssignment, (req, res) =>
                COUNT(*) AS imagesAdded,
                SUM(CASE WHEN completed_at IS NOT NULL THEN 1 ELSE 0 END) AS imagesCompleted
         FROM images
-        WHERE project_id = ?
+        WHERE project_id = ? ${baseImageFilter}
         GROUP BY date
       ) img ON img.date = d.date
       LEFT JOIN (
@@ -276,7 +290,7 @@ router.get('/:projectId/reports/timeline', checkProjectAssignment, (req, res) =>
                COUNT(*) AS annotationsCount
         FROM annotations a
         JOIN images i ON i.id = a.image_id
-        WHERE i.project_id = ?
+        WHERE i.project_id = ? ${imageFilter}
         GROUP BY date
       ) ann ON ann.date = d.date
       ORDER BY d.date ASC

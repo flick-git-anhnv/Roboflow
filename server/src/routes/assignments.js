@@ -96,6 +96,18 @@ router.put('/', requireRole('admin'), (req, res) => {
   res.json({ ok: true });
 });
 
+// DELETE /api/projects/:projectId/assignments/:userId — admin only
+// Xoá user khỏi danh sách phân công (xoá mục tiêu %)
+router.delete('/:userId', requireRole('admin'), (req, res) => {
+  const { projectId, userId } = req.params;
+  const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(projectId);
+  if (!project) return res.status(404).json({ error: 'Không tìm thấy project' });
+
+  db.prepare('DELETE FROM project_assignments WHERE project_id = ? AND user_id = ?').run(projectId, userId);
+  logActivity(projectId, req.user.id, 'assignment_deleted', { user_id: Number(userId) });
+  res.json({ ok: true });
+});
+
 // POST /api/projects/:projectId/assignments/distribute — admin only.
 // % là tỉ lệ TUYỆT ĐỐI trên TỔNG số ảnh của project (không phải % tương đối
 // giữa các user có percent>0) — VD: 100 ảnh, A=50% nghĩa là A cần có ĐÚNG 50

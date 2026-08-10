@@ -42,20 +42,33 @@ export const ProjectDetailHeader: React.FC<ProjectDetailHeaderProps> = ({
         <h1>{project.name}</h1>
         <p style={{ margin: '4px 0 0', color: '#666', fontSize: 13 }}>{project.description}</p>
       </div>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        {/* Nhóm thêm dữ liệu */}
+        <button className="btn btn-primary" onClick={() => fileInputRef.current?.click()}>+ Tải ảnh lên</button>
+        <button className="btn btn-outline" onClick={() => folderInputRef.current?.click()}>📁 Tải thư mục</button>
+        <button className="btn btn-outline" onClick={() => zipInputRef.current?.click()}>🗜 Tải file ZIP</button>
+
+        <div style={{ width: 1, height: 24, background: '#cbd5e1', margin: '0 4px' }} />
+
+        {/* Nhóm 1: Kiểm tra & Phân công */}
+        <button className="btn btn-outline" onClick={onOpenValidate}>🔍 Kiểm tra dataset</button>
         <button className="btn btn-outline" onClick={onOpenStats}>📊 Thống kê</button>
+        <button className="btn btn-outline" onClick={onOpenAssignment}>👥 Phân công</button>
+        
+        <div style={{ width: 1, height: 24, background: '#cbd5e1', margin: '0 4px' }} />
+
+        {/* Nhóm 2: Model & Auto Label */}
+        <button className="btn btn-outline" onClick={onOpenModelManager}>⚙ Quản lý Model</button>
         <button className="btn btn-outline" onClick={onOpenAutoLabel}>🤖 Auto Label</button>
         <button className="btn btn-outline" onClick={onOpenPromptModal} style={{ background: '#3b82f6', color: '#fff', border: 'none' }}>💬 Auto-Prompt</button>
-        <button className="btn btn-outline" onClick={onOpenVersions}>📦 Phiên bản</button>
-        <button className="btn btn-outline" onClick={onOpenTraining} style={{ background: '#8b5cf6', color: '#fff', border: 'none' }}>🚀 Train Model</button>
+
+        <div style={{ width: 1, height: 24, background: '#cbd5e1', margin: '0 4px' }} />
+
+        {/* Nhóm 3: Train & Export */}
         <button className="btn btn-outline" onClick={onOpenWorkflows}>🔀 Workflows</button>
-        <button className="btn btn-outline" onClick={onOpenModelManager}>⚙ Quản lý Model</button>
-        <button className="btn btn-outline" onClick={onOpenValidate}>Kiểm tra dataset</button>
-        <button className="btn btn-outline" onClick={onOpenAssignment}>👥 Phân công</button>
+        <button className="btn btn-outline" onClick={onOpenTraining} style={{ background: '#8b5cf6', color: '#fff', border: 'none' }}>🚀 Train Model</button>
+        <button className="btn btn-outline" onClick={onOpenVersions}>📦 Phiên bản</button>
         <button className="btn btn-secondary" onClick={onOpenExport}>⬇ Export dataset</button>
-        <button className="btn btn-outline" onClick={() => zipInputRef.current?.click()}>🗜 Tải file ZIP</button>
-        <button className="btn btn-outline" onClick={() => folderInputRef.current?.click()}>📁 Tải thư mục</button>
-        <button className="btn btn-primary" onClick={() => fileInputRef.current?.click()}>+ Tải ảnh lên</button>
         <input
           ref={fileInputRef} type="file" multiple accept="image/*" hidden
           onChange={(e) => { if (e.target.files) onHandleFiles(e.target.files); e.target.value = ''; }}

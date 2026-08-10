@@ -36,27 +36,36 @@ export async function backfillMissingHashes(arg1, arg2) {
     : "SELECT id, filename, project_id FROM images WHERE (file_hash IS NULL OR file_hash = '') LIMIT 500";
 
   const params = projectId ? [projectId] : [];
-  const unhashed = targetDb.prepare(query).all(...params);
-
-  if (!unhashed.length) return 0;
-
   const updateStmt = targetDb.prepare('UPDATE images SET file_hash = ? WHERE id = ?');
-  let count = 0;
+  let totalCount = 0;
 
-  for (const img of unhashed) {
-    const pId = img.project_id || projectId;
-    const filePath = path.join(UPLOAD_DIR, pId, img.filename);
-    try {
-      if (fs.existsSync(filePath)) {
-        const hash = md5File(filePath);
-        if (hash) {
-          updateStmt.run(hash, img.id);
-          count++;
+  while (true) {
+    const unhashed = targetDb.prepare(query).all(...params);
+    if (!unhashed.length) break;
+
+    let count = 0;
+    for (const img of unhashed) {
+      const pId = img.project_id || projectId;
+      const filePath = path.join(UPLOAD_DIR, pId, img.filename);
+      try {
+        if (fs.existsSync(filePath)) {
+          const hash = md5File(filePath);
+          if (hash) {
+            updateStmt.run(hash, img.id);
+            count++;
+          }
         }
+      } catch (e) {
+        console.error(`[hashService] Failed to compute hash for image ${img.id}:`, e.message);
       }
-    } catch (e) {
-      console.error(`[hashService] Failed to compute hash for image ${img.id}:`, e.message);
     }
+    
+    // If no hashes were updated in this batch (e.g. files missing), prevent infinite loop
+    if (count === 0) break;
+    
+    totalCount += count;
+    // Yield event loop to avoid blocking main thread
+    await new Promise(resolve => setTimeout(resolve, 50));
   }
-  return count;
+  return totalCount;
 }

@@ -16,12 +16,9 @@ export const ModelTrainingModal: React.FC<ModelTrainingModalProps> = ({ projectI
   const [architecture, setArchitecture] = useState('yolov8s');
   const [epochs, setEpochs] = useState(50);
 
-  // Realtime Live Simulation Engine State
-  const [isTraining, setIsTraining] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [currentEpoch, setCurrentEpoch] = useState(0);
-  const [trainLogs, setTrainLogs] = useState<string[]>([]);
-  const [liveMetrics, setLiveMetrics] = useState({ boxLoss: 1.25, clsLoss: 1.84, mAP50: 0.25, precision: 0.30 });
+  // Realtime Live Simulation Engine State (moved to backend)
+  const [runningJobId, setRunningJobId] = useState<string | null>(null);
+  const [pollInterval, setPollInterval] = useState<ReturnType<typeof setInterval> | null>(null);
 
   const loadData = async () => {
     setLoading(true);
@@ -44,59 +41,37 @@ export const ModelTrainingModal: React.FC<ModelTrainingModalProps> = ({ projectI
 
   useEffect(() => {
     loadData();
+    const interval = setInterval(() => {
+      loadData();
+    }, 1500);
+    setPollInterval(interval);
+    return () => clearInterval(interval);
   }, [projectId]);
 
   const handleStartTrain = async () => {
-    setIsTraining(true);
-    setProgress(0);
-    setCurrentEpoch(0);
-    setTrainLogs([
-      `[INIT] Initializing ${architecture.toUpperCase()} training environment...`,
-      `[CUDA] GPU Device: NVIDIA GeForce RTX 4090 (24GB VRAM)`,
-      `[DATASET] Loading dataset version split (70% Train / 20% Val / 10% Test)...`,
-      `[MODEL] Model summary: 225 layers, 11,166,560 parameters, 28.6 GFLOPs`,
-      `[TRAIN] Starting training loop for ${epochs} epochs (batch_size=16, lr0=0.01)...`,
-    ]);
-
-    // Live training simulation interval
-    let ep = 0;
-    const interval = setInterval(() => {
-      ep += 2;
-      if (ep > epochs) ep = epochs;
-      const pct = Math.floor((ep / epochs) * 100);
-      setProgress(pct);
-      setCurrentEpoch(ep);
-
-      const boxL = Math.max(0.12, +(1.25 - (ep / epochs) * 1.1).toFixed(3));
-      const clsL = Math.max(0.15, +(1.84 - (ep / epochs) * 1.6).toFixed(3));
-      const map = Math.min(0.92, +(0.25 + (ep / epochs) * 0.67).toFixed(3));
-      const prec = Math.min(0.94, +(0.30 + (ep / epochs) * 0.64).toFixed(3));
-
-      setLiveMetrics({ boxLoss: boxL, clsLoss: clsL, mAP50: map, precision: prec });
-      setTrainLogs((prev) => [
-        ...prev.slice(-15),
-        `Epoch ${ep}/${epochs} - box_loss: ${boxL} | cls_loss: ${clsL} | mAP50: ${(map * 100).toFixed(1)}% | Precision: ${(prec * 100).toFixed(1)}%`,
-      ]);
-
-      if (ep >= epochs) {
-        clearInterval(interval);
-        setTrainLogs((prev) => [
-          ...prev,
-          `[SUCCESS] Training completed cleanly! Best weights saved to weights/best.pt`,
-          `[EVAL] Final validation mAP@0.5: ${(map * 100).toFixed(1)}%`,
-        ]);
-        setTimeout(() => {
-          setIsTraining(false);
-          startTrainingJob(projectId, {
-            datasetVersionId: selectedVersionId || 'v1.0.0',
-            architecture,
-            epochs,
-            batchSize: 16,
-          }).then(() => loadData());
-        }, 1200);
+    try {
+      const res = await startTrainingJob(projectId, {
+        datasetVersionId: selectedVersionId || 'v1.0.0',
+        architecture,
+        epochs,
+        batchSize: 16,
+      });
+      if (res.success && res.job) {
+        setRunningJobId(res.job.id);
+        loadData();
       }
-    }, 250);
+    } catch (err) {
+      console.error(err);
+      alert('Failed to start training');
+    }
   };
+
+  const runningJob = jobs.find(j => j.status === 'running');
+  const isTraining = !!runningJob;
+  const currentEpoch = runningJob?.metrics?.epochsCompleted || 0;
+  const progress = epochs > 0 ? Math.floor((currentEpoch / epochs) * 100) : 0;
+  const liveMetrics = runningJob?.metrics || { boxLoss: 0, clsLoss: 0, mAP50: 0, precision: 0 };
+  const trainLogs = runningJob?.logs ? JSON.parse(runningJob.logs) : [];
 
   const handleDownloadWeights = (jobId: string, arch: string) => {
     const element = document.createElement('a');
@@ -168,7 +143,7 @@ export const ModelTrainingModal: React.FC<ModelTrainingModalProps> = ({ projectI
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#94a3b8', marginBottom: 6, borderBottom: '1px solid #1e293b', paddingBottom: 4 }}>
                 <Terminal size={14} /> Training Console Output:
               </div>
-              {trainLogs.map((l, i) => (
+              {trainLogs.map((l: string, i: number) => (
                 <div key={i} style={{ color: l.includes('SUCCESS') ? '#34d399' : l.includes('Epoch') ? '#f1f5f9' : '#94a3b8' }}>
                   {l}
                 </div>
@@ -240,7 +215,7 @@ export const ModelTrainingModal: React.FC<ModelTrainingModalProps> = ({ projectI
           Lịch Sử Tác Vụ Huấn Luyện & Weights Đã Xuất
         </h4>
 
-        {loading ? (
+        {loading && jobs.length === 0 ? (
           <p style={{ color: '#94a3b8' }}>Đang tải danh sách tác vụ...</p>
         ) : jobs.length === 0 ? (
           <p style={{ color: '#64748b', fontSize: 13 }}>Chưa có tác vụ huấn luyện nào.</p>
@@ -248,25 +223,33 @@ export const ModelTrainingModal: React.FC<ModelTrainingModalProps> = ({ projectI
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxHeight: 220, overflowY: 'auto' }}>
             {jobs.map((j) => {
               const m = j.metrics || {};
+              const isJobRunning = j.status === 'running';
               return (
                 <div key={j.id} style={{ background: '#0f172a', border: '1px solid #334155', borderRadius: 12, padding: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <Award size={18} color="#c084fc" />
                       <strong style={{ fontSize: 15, color: '#f8fafc' }}>{j.model_architecture.toUpperCase()}</strong>
-                      <span style={{ fontSize: 12, background: 'rgba(16, 185, 129, 0.15)', color: '#34d399', padding: '2px 8px', borderRadius: 12, border: '1px solid rgba(52, 211, 153, 0.3)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <CheckCircle2 size={12} /> COMPLETED
-                      </span>
+                      {isJobRunning ? (
+                         <span style={{ fontSize: 12, background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', padding: '2px 8px', borderRadius: 12, border: '1px solid rgba(56, 189, 248, 0.3)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <Activity size={12} className="animate-spin" /> RUNNING
+                         </span>
+                      ) : (
+                         <span style={{ fontSize: 12, background: 'rgba(16, 185, 129, 0.15)', color: '#34d399', padding: '2px 8px', borderRadius: 12, border: '1px solid rgba(52, 211, 153, 0.3)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                           <CheckCircle2 size={12} /> COMPLETED
+                         </span>
+                      )}
                     </div>
                     <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>
-                      mAP@0.5: <strong style={{ color: '#38bdf8' }}>{((m.mAP50 || 0.892) * 100).toFixed(1)}%</strong> • Precision: <strong style={{ color: '#34d399' }}>{((m.precision || 0.915) * 100).toFixed(1)}%</strong> • Recall: <strong style={{ color: '#fbbf24' }}>{((m.recall || 0.868) * 100).toFixed(1)}%</strong>
+                      mAP@0.5: <strong style={{ color: '#38bdf8' }}>{((m.mAP50 || 0) * 100).toFixed(1)}%</strong> • Precision: <strong style={{ color: '#34d399' }}>{((m.precision || 0) * 100).toFixed(1)}%</strong> • Recall: <strong style={{ color: '#fbbf24' }}>{((m.recall || 0) * 100).toFixed(1)}%</strong>
                     </div>
                   </div>
 
                   <button
                     className="btn btn-outline"
                     onClick={() => handleDownloadWeights(j.id, j.model_architecture)}
-                    style={{ background: '#1e293b', borderColor: '#38bdf8', color: '#38bdf8', borderRadius: 8, padding: '6px 14px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}
+                    disabled={isJobRunning}
+                    style={{ opacity: isJobRunning ? 0.5 : 1, background: '#1e293b', borderColor: '#38bdf8', color: '#38bdf8', borderRadius: 8, padding: '6px 14px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}
                   >
                     <Download size={14} /> Tải Weights (.pt)
                   </button>

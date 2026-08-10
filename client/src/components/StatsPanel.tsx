@@ -8,7 +8,7 @@ import AnnotationTimelineChart from './dashboard/AnnotationTimelineChart';
 import AnnotatorProductivityChart from './dashboard/AnnotatorProductivityChart';
 import ReportExportControls from './dashboard/ReportExportControls';
 
-export default function StatsPanel({ projectId, onClose }: { projectId: string; onClose: () => void }) {
+export default function StatsPanel({ projectId, labelType, onClose }: { projectId: string; labelType?: string; onClose: () => void }) {
   const [dashboard, setDashboard] = useState<ProjectDashboardData | null>(null);
   const [userReports, setUserReports] = useState<UserReportItem[]>([]);
   const [timeline, setTimeline] = useState<TimelineReportItem[]>([]);
@@ -110,7 +110,7 @@ export default function StatsPanel({ projectId, onClose }: { projectId: string; 
                 onClick={() => setActiveTab('overview')}
               >
                 <BarChart2 size={16} />
-                <span>Phân bố Class & Split</span>
+                <span>{labelType === 'text_rec' ? 'Tần suất Ký tự & Split' : 'Phân bố Class & Split'}</span>
               </button>
               <button
                 type="button"
@@ -134,10 +134,10 @@ export default function StatsPanel({ projectId, onClose }: { projectId: string; 
             <div className="stats-tab-content">
               {activeTab === 'overview' && (
                 <div className="stats-overview-grid">
-                  <div className="grid-col-left">
-                    <ClassDistributionChart data={dashboard.datasetBalance.perClass} />
+                  <div className="grid-col-left" style={{ minWidth: 0 }}>
+                    <ClassDistributionChart data={dashboard.datasetBalance.perClass} labelType={labelType} />
                   </div>
-                  <div className="grid-col-right">
+                  <div className="grid-col-right" style={{ minWidth: 0 }}>
                     <DatasetSplitBreakdown bySplit={dashboard.datasetBalance.bySplit} />
                   </div>
                 </div>

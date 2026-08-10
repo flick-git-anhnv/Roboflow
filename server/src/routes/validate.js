@@ -25,29 +25,43 @@ router.get('/validate', (req, res) => {
     if (!project) return res.status(404).json({ error: 'Không tìm thấy project' });
 
     // ── 1. Non-blocking async backfill missing hashes ─────────────────────────────
-    setImmediate(() => {
-      backfillMissingHashes(db, projectId).catch((e) => {
-        console.error('[validate] Async hash backfill error:', e.message);
+    const unhashedCountObj = db.prepare("SELECT COUNT(*) AS c FROM images WHERE project_id = ? AND (file_hash IS NULL OR file_hash = '')").get(projectId);
+    const hasPendingHashes = unhashedCountObj.c > 0;
+
+    if (hasPendingHashes) {
+      setImmediate(() => {
+        backfillMissingHashes(db, projectId).catch((e) => {
+          console.error('[validate] Async hash backfill error:', e.message);
+        });
       });
-    });
+    }
 
     // ── 2. Duplicate detection (Instant SQL Hash Aggregation) ─────────────────────
     const duplicateGroups = db.prepare(`
-      SELECT file_hash, GROUP_CONCAT(id) AS image_ids_str, COUNT(*) AS count
+      SELECT file_hash, 
+             GROUP_CONCAT(id, '||') AS image_ids_str,
+             GROUP_CONCAT(filename, '||') AS filenames_str,
+             COUNT(*) AS count
       FROM images
       WHERE project_id = ? AND file_hash IS NOT NULL AND file_hash != ''
       GROUP BY file_hash
       HAVING count > 1
     `).all(projectId);
 
-    const duplicates = duplicateGroups.map((g) => ({
-      hash: g.file_hash,
-      imageIds: g.image_ids_str ? g.image_ids_str.split(',') : [],
-    }));
+    const duplicates = duplicateGroups.map((g) => {
+      const ids = g.image_ids_str ? g.image_ids_str.split('||') : [];
+      const fnames = g.filenames_str ? g.filenames_str.split('||') : [];
+      const images = ids.map((id, i) => ({ id, filename: fnames[i] }));
+      return {
+        hash: g.file_hash,
+        images,
+        imageIds: ids,
+      };
+    });
 
     // ── 3. Annotation lỗi tọa độ ────────────────────────────────────────────────
     const annotations = db.prepare(`
-      SELECT a.id, a.image_id, a.x, a.y, a.w, a.h,
+      SELECT a.id, a.image_id, a.x, a.y, a.w, a.h, a.type,
              i.width AS img_width, i.height AS img_height
       FROM annotations a
       JOIN images i ON i.id = a.image_id
@@ -56,6 +70,8 @@ router.get('/validate', (req, res) => {
 
     const invalidAnnotations = [];
     for (const a of annotations) {
+      if (a.type === 'text_rec') continue; // Skip coordinate checking for OCR-level text_rec boxes which might cover 0,0,0,0
+      
       const reasons = [];
       if (a.w <= 0) reasons.push('w <= 0');
       if (a.h <= 0) reasons.push('h <= 0');
@@ -92,10 +108,11 @@ router.get('/validate', (req, res) => {
 
     const unusedClasses = classes.filter((c) => !usedClassIds.has(c.id));
 
-    res.json({
+    return res.json({
       duplicates,
       invalidAnnotations,
       unusedClasses,
+      isHashing: hasPendingHashes
     });
   } catch (err) {
     console.error('[validate error]', err);

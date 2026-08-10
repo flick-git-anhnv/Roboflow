@@ -45,6 +45,8 @@ interface AnnotatorToolbarProps {
   onApproveReview: () => void;
   onRejectReview: () => void;
   onOpenPromptModal?: () => void;
+  onOpenAutoLabel?: () => void;
+  onDeleteImage?: () => void;
 }
 
 export const AnnotatorToolbar: React.FC<AnnotatorToolbarProps> = ({
@@ -82,6 +84,8 @@ export const AnnotatorToolbar: React.FC<AnnotatorToolbarProps> = ({
   onApproveReview,
   onRejectReview,
   onOpenPromptModal,
+  onOpenAutoLabel,
+  onDeleteImage,
 }) => {
   const isCopyPrevDisabled = !prevImageItem || prevImageItem.status === 'unlabeled' || copyingLabels;
 
@@ -155,6 +159,7 @@ export const AnnotatorToolbar: React.FC<AnnotatorToolbarProps> = ({
       <button className="btn btn-outline" onClick={() => onGoTo(-1)} disabled={currentIndex <= 0}>‹ Ảnh trước</button>
       <button className="btn btn-outline" onClick={() => onGoTo(1)} disabled={currentIndex < 0 || currentIndex >= totalImages - 1}>Ảnh sau ›</button>
       <button className="btn btn-outline" onClick={copyImageToClipboard} title="Copy ảnh hiện tại vào clipboard" style={{ fontSize: 12, padding: '2px 8px' }}>📸 Copy ảnh</button>
+      <button className="btn btn-outline" onClick={onDeleteImage} title="Xoá ảnh hiện tại" style={{ fontSize: 12, padding: '2px 8px', color: '#dc2626', borderColor: '#dc2626' }}>🗑️ Xoá ảnh</button>
 
       <div className="tool-toggle">
         <button
@@ -178,6 +183,14 @@ export const AnnotatorToolbar: React.FC<AnnotatorToolbarProps> = ({
           style={{ background: tool === 'sam_smart_polygon' ? '#8b5cf6' : undefined, color: tool === 'sam_smart_polygon' ? '#fff' : undefined }}
         >
           🪄 Smart SAM
+        </button>
+        <button
+          className="tool-btn"
+          onClick={onOpenAutoLabel}
+          title="Auto-Label hàng loạt bằng Model đã train (YOLOv8)"
+          style={{ background: '#2e7d32', color: '#fff' }}
+        >
+          🤖 Auto Label
         </button>
         <button
           className="tool-btn"

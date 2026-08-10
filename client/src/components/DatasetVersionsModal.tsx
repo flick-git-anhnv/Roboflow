@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { getDatasetVersions, createDatasetVersion } from '../api';
-import { Layers, Sliders, CheckCircle2, Box, Sparkles, ArrowRight } from 'lucide-react';
+import { getDatasetVersions, createDatasetVersion, deleteDatasetVersion } from '../api';
+import { Layers, Sliders, CheckCircle2, Box, Sparkles, ArrowRight, Trash2 } from 'lucide-react';
 
 interface DatasetVersionsModalProps {
   projectId: string;
@@ -52,6 +52,19 @@ export const DatasetVersionsModal: React.FC<DatasetVersionsModalProps> = ({ proj
       alert('Lỗi tạo phiên bản Dataset: ' + err.message);
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleDeleteVersion = async (versionId: string) => {
+    if (!confirm('Bạn có chắc chắn muốn xoá phiên bản dataset này không?')) return;
+    try {
+      const res = await deleteDatasetVersion(projectId, versionId);
+      if (res.success) {
+        alert('Đã xoá phiên bản dataset thành công');
+        loadVersions();
+      }
+    } catch (err: any) {
+      alert('Lỗi khi xoá dataset version: ' + err.message);
     }
   };
 
@@ -166,12 +179,17 @@ export const DatasetVersionsModal: React.FC<DatasetVersionsModalProps> = ({ proj
                     </div>
                   </div>
                 </div>
-                <span style={{
-                  background: 'rgba(56, 189, 248, 0.15)', border: '1px solid rgba(56, 189, 248, 0.3)',
-                  color: '#38bdf8', padding: '4px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4
-                }}>
-                  <CheckCircle2 size={13} /> Frozen & Verified
-                </span>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <span style={{
+                    background: 'rgba(56, 189, 248, 0.15)', border: '1px solid rgba(56, 189, 248, 0.3)',
+                    color: '#38bdf8', padding: '4px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4
+                  }}>
+                    <CheckCircle2 size={13} /> Frozen & Verified
+                  </span>
+                  <button className="btn btn-outline" onClick={() => handleDeleteVersion(v.id)} style={{ padding: '4px 8px', fontSize: 12, borderRadius: 6, color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.3)' }}>
+                    <Trash2 size={14} />
+                  </button>
+                </div>
               </div>
             ))}
           </div>

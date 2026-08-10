@@ -44,10 +44,12 @@ export const AnnotationListPanel: React.FC<AnnotationListPanelProps> = ({
                 outline: isSelected ? `2px solid ${cls?.color || '#F05922'}` : isHovered ? '1px dashed #8b5cf6' : 'none',
                 background: isHovered ? 'rgba(139, 92, 246, 0.15)' : undefined
               }}>
-              <span className="swatch" style={{ background: cls?.color }} />
-              <span>{cls?.name}</span>
+              <span className="swatch" style={{ background: cls?.color || '#3b82f6' }} />
+              <span style={{ fontWeight: b.type === 'text_rec' ? 'bold' : 'normal', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: 120 }} title={b.type === 'text_rec' ? b.text_content : cls?.name}>
+                {b.type === 'text_rec' ? (b.text_content || 'Chưa nhập chữ') : cls?.name}
+              </span>
               <span className="shape-tag">
-                {b.type === 'sam_smart_polygon' ? '🟣 SAM' : b.type === 'quad' ? '◈ 4 điểm' : '▭ box'}
+                {b.type === 'sam_smart_polygon' ? '🟣 SAM' : b.type === 'quad' ? '◈ 4 điểm' : b.type === 'text_rec' ? '🔤 Text' : '▭ box'}
               </span>
               <button onClick={(e) => {
                 e.stopPropagation();

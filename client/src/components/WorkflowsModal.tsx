@@ -1,13 +1,25 @@
 import React, { useEffect, useState } from 'react';
-import { getCVWorkflows, createCVWorkflow } from '../api';
-import { Network, GitBranch, ArrowRight, Zap, Play, Plus, Trash2, Settings, Terminal, CheckCircle2 } from 'lucide-react';
+import { getCVWorkflows, createCVWorkflow, updateCVWorkflow, deleteCVWorkflow, testCVWorkflow } from '../api';
+import { Network, GitBranch, ArrowRight, Zap, Play, Plus, Trash2, Settings, Terminal, CheckCircle2, Loader, Edit, FilePlus } from 'lucide-react';
 
 interface NodeItem {
   id: string;
   type: string;
-  label: string;
+  label?: string;
   config: Record<string, any>;
 }
+
+const getDefaultLabel = (type: string, label?: string) => {
+  if (label) return label;
+  switch(type) {
+    case 'cameraInput': return '📹 RTSP Stream';
+    case 'yoloModel': return '🚗 YOLO Detector';
+    case 'cropRegion': return '🔍 Region Crop';
+    case 'ocrModel': return '🔢 OCR Engine';
+    case 'actionAlert': return '📄 Webhook Alert';
+    default: return type;
+  }
+};
 
 interface WorkflowsModalProps {
   projectId: string;
@@ -18,6 +30,7 @@ export const WorkflowsModal: React.FC<WorkflowsModalProps> = ({ projectId, onClo
   const [workflows, setWorkflows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [editingWorkflowId, setEditingWorkflowId] = useState<string | null>(null);
   const [wfName, setWfName] = useState('Traffic Security & License Plate Pipeline');
 
   // Interactive Graph Builder State
@@ -50,11 +63,21 @@ export const WorkflowsModal: React.FC<WorkflowsModalProps> = ({ projectId, onClo
   }, [projectId]);
 
   const handleAddNode = (type: string, defaultLabel: string) => {
+    let defaultConfig = {};
+    switch(type) {
+      case 'cameraInput': defaultConfig = { url: 'rtsp://192.168.1.100:554/live' }; break;
+      case 'yoloModel': defaultConfig = { model: 'yolov8s', confidence: 0.65 }; break;
+      case 'cropRegion': defaultConfig = { padding: 10 }; break;
+      case 'ocrModel': defaultConfig = { lang: 'en_lao' }; break;
+      case 'actionAlert': defaultConfig = { endpoint: 'https://api.kztek.vn/alerts' }; break;
+      default: defaultConfig = { confidence: 0.5, enabled: true };
+    }
+
     const newNode: NodeItem = {
       id: `n-${Date.now()}`,
       type,
       label: defaultLabel,
-      config: { confidence: 0.5, enabled: true },
+      config: defaultConfig,
     };
     setNodes((prev) => [...prev, newNode]);
     setSelectedNodeId(newNode.id);
@@ -65,21 +88,19 @@ export const WorkflowsModal: React.FC<WorkflowsModalProps> = ({ projectId, onClo
     if (selectedNodeId === id) setSelectedNodeId(null);
   };
 
-  const handleRunTestPipeline = () => {
+  const handleRunTestPipeline = async () => {
     setIsRunningTest(true);
-    setTestLogs([
-      `[PIPELINE] Initializing node pipeline execution...`,
-      `[NODE 1] Connecting to RTSP Stream (rtsp://192.168.1.100:554/live)... Connected (30fps)`,
-      `[NODE 2] Executing YOLOv8 Object Detection (conf=0.65)... Detected 3 vehicle objects`,
-      `[NODE 3] Cropping BBox Region (License Plate area)... 3 sub-images cropped`,
-      `[NODE 4] Executing OCR License Plate Engine... Extracted text: "AS 2223" (conf=98.4%)`,
-      `[NODE 5] Triggering Webhook POST to https://api.kztek.vn/alerts... 200 OK (12ms)`,
-      `[SUCCESS] Pipeline execution test completed in 42ms ✓`,
-    ]);
-
-    setTimeout(() => {
+    setTestLogs(['[PIPELINE] Đang gửi yêu cầu test đến Server...']);
+    try {
+      const res = await testCVWorkflow(projectId, nodes);
+      if (res.success && res.logs) {
+        setTestLogs(res.logs);
+      }
+    } catch (err: any) {
+      setTestLogs([`[ERROR] Lỗi khi chạy test: ${err.message}`]);
+    } finally {
       setIsRunningTest(false);
-    }, 1500);
+    }
   };
 
   const handleSaveWorkflow = async () => {
@@ -92,19 +113,58 @@ export const WorkflowsModal: React.FC<WorkflowsModalProps> = ({ projectId, onClo
         target: nodes[i + 1].id,
       }));
 
-      const res = await createCVWorkflow(projectId, {
+      const payload = {
         name: wfName.trim(),
         graphNodes: nodes,
         graphEdges: edges,
         isActive: true,
-      });
-      alert(res.message);
+      };
+
+      if (editingWorkflowId) {
+        const res = await updateCVWorkflow(projectId, editingWorkflowId, payload);
+        alert(res.message || 'Cập nhật thành công');
+      } else {
+        const res = await createCVWorkflow(projectId, payload);
+        alert(res.message);
+      }
+      
+      setEditingWorkflowId(null);
       loadWorkflows();
     } catch (err: any) {
       alert('Lỗi lưu quy trình: ' + err.message);
     } finally {
       setCreating(false);
     }
+  };
+
+  const handleEditWorkflow = (w: any) => {
+    setEditingWorkflowId(w.id);
+    setWfName(w.name);
+    setNodes(w.graph_nodes || []);
+    setSelectedNodeId(null);
+  };
+
+  const handleDeleteWorkflow = async (id: string) => {
+    if (!confirm('Bạn có chắc chắn muốn xoá quy trình này không?')) return;
+    try {
+      const res = await deleteCVWorkflow(projectId, id);
+      if (res.success) {
+        alert('Xoá thành công');
+        if (editingWorkflowId === id) {
+          handleCreateNew();
+        }
+        loadWorkflows();
+      }
+    } catch (err: any) {
+      alert('Lỗi xoá quy trình: ' + err.message);
+    }
+  };
+
+  const handleCreateNew = () => {
+    setEditingWorkflowId(null);
+    setWfName('New Pipeline');
+    setNodes([]);
+    setSelectedNodeId(null);
   };
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId);
@@ -141,11 +201,15 @@ export const WorkflowsModal: React.FC<WorkflowsModalProps> = ({ projectId, onClo
               style={{ flex: 1, maxWidth: 400, padding: '8px 12px', borderRadius: 8, background: '#0f172a', border: '1px solid #334155', color: '#fff', fontSize: 14 }}
             />
             <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-outline" onClick={handleCreateNew} style={{ background: '#1e293b', borderColor: '#3b82f6', color: '#60a5fa', borderRadius: 8, padding: '6px 14px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <FilePlus size={14} /> Tạo mới
+              </button>
               <button className="btn btn-outline" onClick={handleRunTestPipeline} disabled={isRunningTest} style={{ background: '#1e293b', borderColor: '#10b981', color: '#34d399', borderRadius: 8, padding: '6px 14px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Play size={14} fill="#34d399" /> {isRunningTest ? 'Running Pipeline...' : 'Test Run Pipeline'}
+                {isRunningTest ? <Loader size={14} className="animate-spin" color="#34d399" /> : <Play size={14} fill="#34d399" />} 
+                {isRunningTest ? 'Running Pipeline...' : 'Test Run Pipeline'}
               </button>
               <button className="btn btn-primary" onClick={handleSaveWorkflow} disabled={creating} style={{ background: 'linear-gradient(135deg, #059669, #2563eb)', border: 'none', borderRadius: 8, padding: '6px 16px', fontWeight: 600, fontSize: 13 }}>
-                {creating ? 'Saving...' : '💾 Lưu Active Workflow'}
+                {creating ? 'Saving...' : editingWorkflowId ? '💾 Cập nhật Workflow' : '💾 Lưu Active Workflow'}
               </button>
             </div>
           </div>
@@ -182,7 +246,7 @@ export const WorkflowsModal: React.FC<WorkflowsModalProps> = ({ projectId, onClo
                         cursor: 'pointer', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 8, transition: 'all 0.15s ease'
                       }}
                     >
-                      <span>{n.label}</span>
+                      <span>{getDefaultLabel(n.type, n.label)}</span>
                       <button onClick={(e) => { e.stopPropagation(); handleRemoveNode(n.id); }} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: 0 }}>
                         <Trash2 size={13} />
                       </button>
@@ -194,25 +258,28 @@ export const WorkflowsModal: React.FC<WorkflowsModalProps> = ({ projectId, onClo
             )}
           </div>
 
-          {/* Selected Node Parameter Editor */}
           {selectedNode && (
             <div style={{ marginTop: 14, background: '#0f172a', padding: 12, borderRadius: 8, border: '1px solid #1e293b', display: 'flex', alignItems: 'center', gap: 15 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#38bdf8', fontSize: 13, fontWeight: 600 }}>
-                <Settings size={15} /> Param Config ({selectedNode.label}):
+                <Settings size={15} /> Param Config ({getDefaultLabel(selectedNode.type, selectedNode.label)}):
               </div>
-              <div style={{ display: 'flex', gap: 10, flex: 1, fontSize: 12 }}>
-                <input
-                  type="text"
-                  className="form-control"
-                  defaultValue={JSON.stringify(selectedNode.config)}
-                  onChange={(e) => {
-                    try {
-                      const cfg = JSON.parse(e.target.value);
-                      setNodes((prev) => prev.map((item) => (item.id === selectedNode.id ? { ...item, config: cfg } : item)));
-                    } catch {}
-                  }}
-                  style={{ flex: 1, background: '#1e293b', border: '1px solid #334155', color: '#38bdf8', padding: '4px 10px', borderRadius: 6, fontFamily: 'monospace' }}
-                />
+              <div style={{ display: 'flex', gap: 10, flex: 1, flexWrap: 'wrap', fontSize: 12 }}>
+                {Object.entries(selectedNode.config || {}).map(([key, value]) => (
+                  <div key={`${selectedNode.id}-${key}`} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#1e293b', padding: '4px 8px', borderRadius: 6, border: '1px solid #334155' }}>
+                    <span style={{ color: '#94a3b8', fontWeight: 600 }}>{key}:</span>
+                    <input
+                      type={typeof value === 'number' ? 'number' : 'text'}
+                      className="form-control"
+                      value={value as string | number}
+                      step={typeof value === 'number' ? '0.01' : undefined}
+                      onChange={(e) => {
+                        const val = typeof value === 'number' ? Number(e.target.value) : e.target.value;
+                        setNodes((prev) => prev.map((item) => (item.id === selectedNode.id ? { ...item, config: { ...(item.config || {}), [key]: val } } : item)));
+                      }}
+                      style={{ background: 'transparent', border: 'none', color: '#38bdf8', outline: 'none', width: typeof value === 'number' ? 60 : 200, fontFamily: 'monospace' }}
+                    />
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -251,9 +318,17 @@ export const WorkflowsModal: React.FC<WorkflowsModalProps> = ({ projectId, onClo
                     {w.graph_nodes?.length || 0} nút xử lý • RTSP Stream Pipeline
                   </div>
                 </div>
-                <span style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#34d399', padding: '2px 8px', borderRadius: 12, fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <CheckCircle2 size={12} /> ACTIVE
-                </span>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <span style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#34d399', padding: '2px 8px', borderRadius: 12, fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <CheckCircle2 size={12} /> ACTIVE
+                  </span>
+                  <button className="btn btn-outline" onClick={() => handleEditWorkflow(w)} style={{ padding: '4px 8px', fontSize: 12, borderRadius: 6 }}>
+                    <Edit size={14} />
+                  </button>
+                  <button className="btn btn-outline" onClick={() => handleDeleteWorkflow(w.id)} style={{ padding: '4px 8px', fontSize: 12, borderRadius: 6, color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.3)' }}>
+                    <Trash2 size={14} />
+                  </button>
+                </div>
               </div>
             ))}
           </div>

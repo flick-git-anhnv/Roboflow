@@ -165,21 +165,42 @@ export const ModelManagerModal: React.FC<ModelManagerModalProps> = ({
                   {!isEditing && (
                     <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
                       {canReview && (
-                        <button
-                          className="btn btn-outline"
-                          style={{ fontSize: 11, padding: '2px 8px' }}
-                          onClick={() => {
-                            setEditingModelId(m.id);
-                            setEditDraft({
-                              notes: m.notes ?? '',
-                              map_score: m.map_score != null ? String(m.map_score) : '',
-                              version_label: m.version_label ?? '',
-                            });
-                          }}
-                        >
-                          ✏️ Sửa
-                        </button>
+                        <>
+                          <button
+                            className="btn btn-outline"
+                            style={{ fontSize: 11, padding: '2px 8px' }}
+                            onClick={() => {
+                              setEditingModelId(m.id);
+                              setEditDraft({
+                                notes: m.notes ?? '',
+                                map_score: m.map_score != null ? String(m.map_score) : '',
+                                version_label: m.version_label ?? '',
+                              });
+                            }}
+                          >
+                            ✏️ Sửa
+                          </button>
+                          <button
+                            className="btn btn-outline"
+                            style={{ fontSize: 11, padding: '2px 8px', color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.3)' }}
+                            onClick={async () => {
+                              if (!confirm('Bạn có chắc chắn muốn xoá model này không?')) return;
+                              try {
+                                if (projectId) {
+                                  await api.deleteModel(projectId, m.id);
+                                  onRefreshData();
+                                  onShowToast('Đã xoá model thành công');
+                                }
+                              } catch (err: unknown) {
+                                onShowToast(err instanceof Error ? err.message : 'Lỗi khi xoá model', true);
+                              }
+                            }}
+                          >
+                            🗑️ Xoá
+                          </button>
+                        </>
                       )}
+
                       {!isDefault && canReview && (
                         <button
                           className="btn btn-outline"

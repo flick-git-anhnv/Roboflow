@@ -271,11 +271,13 @@ export const api = {
     request<ProjectAssignmentSummary>(`/api/projects/${projectId}/assignments`),
   listAssignmentCandidates: (projectId: string) =>
     request<AssignmentCandidate[]>(`/api/projects/${projectId}/assignments/candidates`),
-  saveAssignmentPercents: (projectId: string, assignments: { user_id: number; percent: number }[]) =>
-    request<{ ok: true }>(`/api/projects/${projectId}/assignments`, {
+  saveAssignmentPercents: (projectId: string, assignments: any[]) =>
+    request<{ ok: boolean }>(`/api/projects/${projectId}/assignments`, {
       method: 'PUT',
       body: JSON.stringify({ assignments }),
     }),
+  deleteAssignment: (projectId: string, userId: number) =>
+    request<{ ok: boolean }>(`/api/projects/${projectId}/assignments/${userId}`, { method: 'DELETE' }),
   distributeAssignments: (projectId: string) =>
     request<{ ok: true; distributed: number; message?: string }>(`/api/projects/${projectId}/assignments/distribute`, {
       method: 'POST',
@@ -368,7 +370,15 @@ export async function requestSamPolygon(projectId: string, imageId: string, poin
   });
 }
 
-export async function requestPromptAutoLabel(projectId: string, textPrompt: string, confidenceThreshold = 0.5, classId?: string) {
+export async function requestPromptAutoLabel(
+  projectId: string,
+  textPrompt: string,
+  confidenceThreshold = 0.5,
+  classId?: string,
+  scope: 'all' | 'unlabeled' | 'selected' = 'all',
+  overwrite = false,
+  imageIds?: string[]
+) {
   return request<{
     success: boolean;
     prompt: string;
@@ -377,7 +387,7 @@ export async function requestPromptAutoLabel(projectId: string, textPrompt: stri
     message: string;
   }>(`/api/projects/${projectId}/auto-label/prompt`, {
     method: 'POST',
-    body: JSON.stringify({ textPrompt, confidenceThreshold, classId })
+    body: JSON.stringify({ textPrompt, confidenceThreshold, classId, scope, overwrite, imageIds })
   });
 }
 
@@ -397,6 +407,12 @@ export async function createDatasetVersion(projectId: string, payload: {
   return request<{ success: boolean; version: any; message: string }>(`/api/projects/${projectId}/versions`, {
     method: 'POST',
     body: JSON.stringify(payload)
+  });
+}
+
+export async function deleteDatasetVersion(projectId: string, versionId: string) {
+  return request<{ success: boolean; deleted: number }>(`/api/projects/${projectId}/versions/${versionId}`, {
+    method: 'DELETE',
   });
 }
 
@@ -424,13 +440,38 @@ export async function getCVWorkflows(projectId: string) {
 
 export async function createCVWorkflow(projectId: string, payload: {
   name: string;
+  graphNodes: any[];
+  graphEdges: any[];
+  isActive: boolean;
+}) {
+  return request<{ success: boolean; workflow: any; message: string }>(`/api/projects/${projectId}/workflows`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateCVWorkflow(projectId: string, workflowId: string, payload: {
+  name?: string;
   graphNodes?: any[];
   graphEdges?: any[];
   isActive?: boolean;
 }) {
-  return request<{ success: boolean; workflow: any; message: string }>(`/api/projects/${projectId}/workflows`, {
+  return request<{ success: boolean; workflow: any; message: string }>(`/api/projects/${projectId}/workflows/${workflowId}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteCVWorkflow(projectId: string, workflowId: string) {
+  return request<{ success: boolean; deleted: number }>(`/api/projects/${projectId}/workflows/${workflowId}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function testCVWorkflow(projectId: string, graphNodes: any[]) {
+  return request<{ success: boolean; logs: string[] }>(`/api/projects/${projectId}/workflows/test`, {
     method: 'POST',
-    body: JSON.stringify(payload)
+    body: JSON.stringify({ graphNodes })
   });
 }
 

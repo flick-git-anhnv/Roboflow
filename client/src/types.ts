@@ -132,6 +132,7 @@ export type AutoLabelJobStatus = 'running' | 'done' | 'error';
 export interface ValidateDuplicate {
   hash: string;
   imageIds: string[];
+  images?: { id: string; filename: string }[];
 }
 export interface ValidateInvalidAnnotation {
   id: string;
@@ -146,6 +147,7 @@ export interface ValidateResult {
   duplicates: ValidateDuplicate[];
   invalidAnnotations: ValidateInvalidAnnotation[];
   unusedClasses: ValidateUnusedClass[];
+  isHashing?: boolean;
 }
 
 export interface AutoLabelJob {

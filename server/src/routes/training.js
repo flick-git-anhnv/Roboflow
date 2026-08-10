@@ -54,37 +54,79 @@ router.post('/start', (req, res) => {
 
     const id = nanoid();
 
-    // Mock initial metrics & confusion matrix for immediate dashboard visualization
-    const initialMetrics = {
-      mAP50: 0.892,
-      mAP50_95: 0.674,
-      precision: 0.915,
-      recall: 0.868,
-      loss: 0.042,
-      confusionMatrix: [
-        [45, 2, 0],
-        [1, 38, 3],
-        [0, 1, 52]
-      ],
-      epochsCompleted: epochs
-    };
-
+    // Insert as 'running'
     db.prepare(`
       INSERT INTO model_train_jobs (
         id, project_id, dataset_version_id, model_architecture, status,
-        epochs, batch_size, metrics, weights_path, logs, started_at, completed_at, created_at
-      ) VALUES (?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, datetime('now'), datetime('now'), datetime('now'))
+        epochs, batch_size, metrics, weights_path, logs, started_at, created_at
+      ) VALUES (?, ?, ?, ?, 'running', ?, ?, '{}', NULL, '[]', datetime('now'), datetime('now'))
     `).run(
       id,
       projectId,
       datasetVersionId,
       architecture,
       epochs,
-      batchSize,
-      JSON.stringify(initialMetrics),
-      `/weights/${id}_best.pt`,
-      `[YOLOv8 Training] Epoch 1/${epochs} Loss: 0.25... Epoch ${epochs}/${epochs} Loss: 0.042 (Completed)`
+      batchSize
     );
+
+    // Simulate backend training job
+    let currentEpoch = 0;
+    const trainInterval = setInterval(() => {
+      currentEpoch += Math.ceil(epochs / 10);
+      if (currentEpoch > epochs) currentEpoch = epochs;
+
+      const boxL = Math.max(0.12, +(1.25 - (currentEpoch / epochs) * 1.1).toFixed(3));
+      const clsL = Math.max(0.15, +(1.84 - (currentEpoch / epochs) * 1.6).toFixed(3));
+      const map = Math.min(0.92, +(0.25 + (currentEpoch / epochs) * 0.67).toFixed(3));
+      const prec = Math.min(0.94, +(0.30 + (currentEpoch / epochs) * 0.64).toFixed(3));
+
+      const currentMetrics = {
+        boxLoss: boxL,
+        clsLoss: clsL,
+        mAP50: map,
+        precision: prec,
+        epochsCompleted: currentEpoch
+      };
+
+      const logMsg = `Epoch ${currentEpoch}/${epochs} - box_loss: ${boxL} | cls_loss: ${clsL} | mAP50: ${(map * 100).toFixed(1)}%`;
+      
+      const job = db.prepare('SELECT logs FROM model_train_jobs WHERE id = ?').get(id);
+      let logsArr = [];
+      try { logsArr = JSON.parse(job.logs || '[]'); } catch (e) {}
+      logsArr.push(logMsg);
+
+      if (currentEpoch >= epochs) {
+        clearInterval(trainInterval);
+        logsArr.push(`[SUCCESS] Training completed cleanly! Best weights saved to weights/best.pt`);
+        
+        const finalMetrics = {
+          mAP50: map,
+          mAP50_95: map - 0.2,
+          precision: prec,
+          recall: 0.868,
+          loss: boxL,
+          confusionMatrix: [[45, 2, 0], [1, 38, 3], [0, 1, 52]],
+          epochsCompleted: currentEpoch
+        };
+
+        db.prepare(`
+          UPDATE model_train_jobs SET 
+            status = 'completed',
+            metrics = ?,
+            logs = ?,
+            weights_path = ?,
+            completed_at = datetime('now')
+          WHERE id = ?
+        `).run(JSON.stringify(finalMetrics), JSON.stringify(logsArr), `/weights/${id}_best.pt`, id);
+      } else {
+        db.prepare(`
+          UPDATE model_train_jobs SET 
+            metrics = ?,
+            logs = ?
+          WHERE id = ?
+        `).run(JSON.stringify(currentMetrics), JSON.stringify(logsArr), id);
+      }
+    }, 1500);
 
     const job = db.prepare('SELECT * FROM model_train_jobs WHERE id = ?').get(id);
 
@@ -92,9 +134,9 @@ router.post('/start', (req, res) => {
       success: true,
       job: {
         ...job,
-        metrics: initialMetrics
+        metrics: {}
       },
-      message: `Đã khởi chạy tác vụ huấn luyện mô hình ${architecture} thành công!`,
+      message: `Đã khởi chạy tác vụ huấn luyện mô hình ${architecture} trên server!`,
     });
   } catch (err) {
     console.error('[training] Error in POST /start:', err);

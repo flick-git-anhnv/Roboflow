@@ -99,6 +99,10 @@ if (!annotationCols.includes('type')) {
 if (!annotationCols.includes('points')) {
   db.exec('ALTER TABLE annotations ADD COLUMN points TEXT');
 }
+if (!annotationCols.includes('source')) {
+  db.exec("ALTER TABLE annotations ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'");
+}
+
 
 const classCols = db.prepare("PRAGMA table_info(classes)").all().map((c) => c.name);
 if (!classCols.includes('hotkey')) {

@@ -136,4 +136,24 @@ router.post('/images/tile', (req, res) => {
   }
 });
 
+/**
+ * DELETE /api/projects/:projectId/versions/:versionId
+ * Delete a dataset version
+ */
+router.delete('/:versionId', (req, res) => {
+  try {
+    const { projectId, versionId } = req.params;
+    const result = db.prepare('DELETE FROM dataset_versions WHERE id = ? AND project_id = ?').run(versionId, projectId);
+    
+    if (result.changes === 0) {
+      return res.status(404).json({ error: 'Dataset version not found' });
+    }
+    
+    res.json({ success: true, deleted: result.changes });
+  } catch (err) {
+    console.error('[versions] Error in DELETE /:', err);
+    res.status(500).json({ error: 'Failed to delete dataset version' });
+  }
+});
+
 export default router;

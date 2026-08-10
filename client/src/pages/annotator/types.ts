@@ -14,5 +14,5 @@ export interface Box {
 
 export type Tool = 'bbox' | 'quad' | 'classify' | 'text_rec' | 'sam_smart_polygon';
 export type DragMode = 'none' | 'draw' | 'move' | 'resize' | 'select';
-export type Handle = 'nw' | 'ne' | 'sw' | 'se' | number | null;
+export type Handle = 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w' | number | null;
 

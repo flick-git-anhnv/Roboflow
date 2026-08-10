@@ -449,19 +449,26 @@ router.delete('/batch', (req, res) => {
     return res.status(400).json({ error: 'imageIds phải là mảng không rỗng' });
   }
 
-  const placeholders = imageIds.map(() => '?').join(',');
-  const found = db.prepare(
-    `SELECT * FROM images WHERE id IN (${placeholders}) AND project_id = ?`
-  ).all(...imageIds, req.params.projectId);
+  const CHUNK_SIZE = 500;
+  let allFound = [];
+  
+  for (let i = 0; i < imageIds.length; i += CHUNK_SIZE) {
+    const chunk = imageIds.slice(i, i + CHUNK_SIZE);
+    const placeholders = chunk.map(() => '?').join(',');
+    const found = db.prepare(
+      `SELECT * FROM images WHERE id IN (${placeholders}) AND project_id = ?`
+    ).all(...chunk, req.params.projectId);
+    allFound = allFound.concat(found);
+  }
 
-  if (found.length !== imageIds.length) {
-    const foundSet = new Set(found.map((i) => i.id));
+  if (allFound.length !== imageIds.length) {
+    const foundSet = new Set(allFound.map((i) => i.id));
     const missing = imageIds.filter((id) => !foundSet.has(id));
     return res.status(404).json({ error: `Không tìm thấy ảnh: ${missing.join(', ')}` });
   }
 
   if (req.user?.role === 'annotator') {
-    const unauthorized = found.filter(
+    const unauthorized = allFound.filter(
       (img) => img.uploaded_by === null || img.uploaded_by !== req.user.id
     );
     if (unauthorized.length > 0) {
@@ -473,15 +480,22 @@ router.delete('/batch', (req, res) => {
     }
   }
 
-  for (const img of found) {
+  for (const img of allFound) {
     fs.unlink(path.join(UPLOAD_DIR, req.params.projectId, img.filename), () => {});
   }
 
-  db.prepare(`DELETE FROM images WHERE id IN (${placeholders})`).run(...imageIds);
+  const deleteTrans = db.transaction((ids) => {
+    for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+      const chunk = ids.slice(i, i + CHUNK_SIZE);
+      const placeholders = chunk.map(() => '?').join(',');
+      db.prepare(`DELETE FROM images WHERE id IN (${placeholders})`).run(...chunk);
+    }
+  });
+  deleteTrans(imageIds);
 
   logActivity(req.params.projectId, req.user?.id ?? null, 'batch_image_delete', {
-    count: found.length,
-    filenames: found.map((i) => i.original_name),
+    count: allFound.length,
+    filenames: allFound.map((i) => i.original_name),
   });
 
   res.status(204).end();

@@ -134,14 +134,61 @@ router.get('/:projectId/dashboard', checkProjectAssignment, (req, res) => {
       if (bySplit[s.split] !== undefined) bySplit[s.split] = s.cnt;
     }
 
-    const perClass = db.prepare(`
-      SELECT c.id AS class_id, c.name, c.color, COUNT(a.id) AS count
-      FROM classes c
-      LEFT JOIN annotations a ON a.class_id = c.id
-      WHERE c.project_id = ?
-      GROUP BY c.id
-      ORDER BY c.sort_order ASC
-    `).all(projectId);
+    let perClass;
+    if (project.label_type === 'text_rec') {
+      const classes = db.prepare('SELECT id, name, color, sort_order FROM classes WHERE project_id = ?').all(projectId);
+      const annotations = db.prepare(`
+        SELECT a.class_id, a.text_content, a.type
+        FROM annotations a
+        JOIN images i ON i.id = a.image_id
+        WHERE i.project_id = ?
+      `).all(projectId);
+
+      const charCounts = {};
+      classes.forEach((c) => {
+        charCounts[c.id] = 0;
+      });
+
+      // Map class name to ID for fast lookup (case-insensitive)
+      const classNameToId = {};
+      classes.forEach((c) => {
+        classNameToId[c.name.toLowerCase()] = c.id;
+      });
+
+      for (const a of annotations) {
+        if (a.type === 'text_rec' && a.text_content) {
+          // Parse string into characters and increment matching classes
+          const chars = a.text_content.split('');
+          for (const char of chars) {
+            const cid = classNameToId[char.toLowerCase()];
+            if (cid !== undefined) {
+              charCounts[cid]++;
+            }
+          }
+        } else {
+          // Fallback/standard annotation: count directly to class_id
+          if (charCounts[a.class_id] !== undefined) {
+            charCounts[a.class_id]++;
+          }
+        }
+      }
+
+      perClass = classes.map((c) => ({
+        class_id: c.id,
+        name: c.name,
+        color: c.color,
+        count: charCounts[c.id] || 0,
+      })).sort((a, b) => a.sort_order - b.sort_order);
+    } else {
+      perClass = db.prepare(`
+        SELECT c.id AS class_id, c.name, c.color, COUNT(a.id) AS count
+        FROM classes c
+        LEFT JOIN annotations a ON a.class_id = c.id
+        WHERE c.project_id = ?
+        GROUP BY c.id
+        ORDER BY c.sort_order ASC
+      `).all(projectId);
+    }
 
     // User Productivity
     const userProductivity = db.prepare(`

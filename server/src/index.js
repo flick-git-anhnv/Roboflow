@@ -28,7 +28,7 @@ function startInferenceService() {
   console.log(`[inference] Spawning inference service (port ${INFERENCE_PORT})...`);
 
   _inferenceProcess = spawn(PYTHON_BIN, [scriptPath], {
-    env: { ...process.env, INFERENCE_PORT },
+    env: { ...process.env, INFERENCE_PORT, PYTHONUNBUFFERED: '1' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
@@ -45,6 +45,13 @@ function startInferenceService() {
   _inferenceProcess.on('exit', (code, signal) => {
     console.log(`[inference] Service stopped (code=${code} signal=${signal})`);
     _inferenceProcess = null;
+    // Auto-retry in 3 seconds if it exited unexpectedly
+    if (code !== 0 && code !== null) {
+      console.log('[inference] Service stopped unexpectedly. Retrying in 3 seconds...');
+      setTimeout(() => {
+        startInferenceService();
+      }, 3000);
+    }
   });
   _inferenceProcess.on('error', (err) => {
     console.error(`[inference] Failed to spawn: ${err.message}`);

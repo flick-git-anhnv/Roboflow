@@ -58,6 +58,25 @@ export default function AssignmentModal({
     }
   };
 
+  const removeAssignment = async (userId: number) => {
+    if (!confirm('Bạn có chắc chắn muốn xoá phân công của người này không?')) return;
+    setBusy(true); setError(null); setMessage(null);
+    try {
+      await api.deleteAssignment(projectId, userId);
+      setMessage('Đã xoá phân công.');
+      
+      const newDrafts = { ...drafts };
+      delete newDrafts[userId];
+      setDrafts(newDrafts);
+      
+      load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const distribute = async () => {
     setBusy(true); setError(null); setMessage(null);
     try {
@@ -139,12 +158,17 @@ export default function AssignmentModal({
                       </td>
                       <td style={{ padding: '6px' }}>
                         {isAdmin ? (
-                          <input
-                            type="number" min={0} max={100} step={1}
-                            value={drafts[userId] ?? '0'}
-                            onChange={(e) => setDrafts((prev) => ({ ...prev, [userId]: e.target.value }))}
-                            style={{ width: 60 }}
-                          />
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <input
+                              type="number" min={0} max={100} step={1}
+                              value={drafts[userId] ?? '0'}
+                              onChange={(e) => setDrafts((prev) => ({ ...prev, [userId]: e.target.value }))}
+                              style={{ width: 60 }}
+                            />
+                            <button onClick={() => removeAssignment(userId)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: 4 }} title="Xoá phân công">
+                              ✕
+                            </button>
+                          </div>
                         ) : (
                           <span>{row?.percent ?? 0}%</span>
                         )}

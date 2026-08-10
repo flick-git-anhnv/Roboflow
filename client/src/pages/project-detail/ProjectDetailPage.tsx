@@ -50,13 +50,23 @@ export default function ProjectDetailPage() {
   const [workflowsOpen, setWorkflowsOpen] = useState(false);
 
   const [promptText, setPromptText] = useState('car');
+  const [promptScope, setPromptScope] = useState<'all' | 'unlabeled' | 'selected'>('all');
+  const [promptOverwrite, setPromptOverwrite] = useState(false);
   const [promptBusy, setPromptBusy] = useState(false);
 
   const handleRunPrompt = async () => {
     if (!projectId || !promptText.trim()) return;
     setPromptBusy(true);
     try {
-      const res = await requestPromptAutoLabel(projectId, promptText.trim());
+      const res = await requestPromptAutoLabel(
+        projectId,
+        promptText.trim(),
+        0.5,
+        undefined,
+        promptScope,
+        promptOverwrite,
+        promptScope === 'selected' ? Array.from(selectedIds) : undefined
+      );
       showToast(res.message);
       setPromptOpen(false);
       load();
@@ -141,6 +151,13 @@ export default function ProjectDetailPage() {
     batchDelete,
   } = useBatchSelection(projectId, setImages, load, showToast);
 
+  // Sync promptScope with selected images when modal opens
+  useEffect(() => {
+    if (promptOpen) {
+      setPromptScope(selectedIds.size > 0 ? 'selected' : 'all');
+    }
+  }, [promptOpen, selectedIds.size]);
+
   const [checkDuplicates, setCheckDuplicates] = useState(false);
 
   const {
@@ -224,6 +241,7 @@ export default function ProjectDetailPage() {
           />
 
           <ClassManagerPanel
+            labelType={project?.label_type}
             classes={classes}
             onAddClass={addClass}
             onUpdateClass={updateClass}
@@ -302,7 +320,7 @@ export default function ProjectDetailPage() {
         </div>
       </div>
 
-      {statsOpen && project && <StatsPanel projectId={project.id} onClose={() => setStatsOpen(false)} />}
+      {statsOpen && project && <StatsPanel projectId={project.id} labelType={project.label_type} onClose={() => setStatsOpen(false)} />}
       {exportOpen && project && (
         <ExportModal
           projectId={project.id}
@@ -371,6 +389,34 @@ export default function ProjectDetailPage() {
                 style={{ width: '100%', padding: '10px 14px', borderRadius: 8, background: '#0f172a', border: '1px solid #334155', color: '#fff', fontSize: 14 }}
               />
             </div>
+            
+            <div style={{ margin: '16px 0' }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 8, color: '#cbd5e1' }}>Phạm vi áp dụng</label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {selectedIds.size > 0 && (
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', padding: '8px 12px', borderRadius: 8, background: promptScope === 'selected' ? 'rgba(37, 99, 235, 0.2)' : '#0f172a', border: promptScope === 'selected' ? '1px solid #2563eb' : '1px solid #334155' }}>
+                    <input type="radio" checked={promptScope === 'selected'} onChange={() => setPromptScope('selected')} style={{ cursor: 'pointer' }} />
+                    Chỉ {selectedIds.size} ảnh đã chọn
+                  </label>
+                )}
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', padding: '8px 12px', borderRadius: 8, background: promptScope === 'unlabeled' ? 'rgba(37, 99, 235, 0.2)' : '#0f172a', border: promptScope === 'unlabeled' ? '1px solid #2563eb' : '1px solid #334155' }}>
+                  <input type="radio" checked={promptScope === 'unlabeled'} onChange={() => setPromptScope('unlabeled')} style={{ cursor: 'pointer' }} />
+                  Chỉ ảnh chưa gán nhãn
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', padding: '8px 12px', borderRadius: 8, background: promptScope === 'all' ? 'rgba(37, 99, 235, 0.2)' : '#0f172a', border: promptScope === 'all' ? '1px solid #2563eb' : '1px solid #334155' }}>
+                  <input type="radio" checked={promptScope === 'all'} onChange={() => setPromptScope('all')} style={{ cursor: 'pointer' }} />
+                  Tất cả ảnh trong project
+                </label>
+              </div>
+            </div>
+
+            <div style={{ margin: '16px 0' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', color: '#cbd5e1' }}>
+                <input type="checkbox" checked={promptOverwrite} onChange={(e) => setPromptOverwrite(e.target.checked)} style={{ cursor: 'pointer', width: 16, height: 16 }} />
+                Ghi đè nhãn đã có sẵn (nếu bỏ chọn, ảnh đã gán nhãn sẽ được giữ nguyên)
+              </label>
+            </div>
+
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
               <button className="btn btn-outline" onClick={() => setPromptOpen(false)} style={{ borderRadius: 8, padding: '8px 16px', borderColor: '#475569', color: '#cbd5e1' }}>Hủy</button>
               <button className="btn btn-primary" onClick={handleRunPrompt} disabled={promptBusy} style={{

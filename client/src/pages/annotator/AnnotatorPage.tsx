@@ -13,6 +13,7 @@ import FilmstripBar from './components/FilmstripBar';
 import QuickClassSwitcherModal from './components/QuickClassSwitcherModal';
 import PrefillBanner from './components/PrefillBanner';
 import QuadHintBanner from './components/QuadHintBanner';
+import AutoLabelModal from '../../components/AutoLabelModal';
 
 import useAnnotatorData from './hooks/useAnnotatorData';
 import useUndoRedo from './hooks/useUndoRedo';
@@ -21,7 +22,7 @@ import useClipboard from './hooks/useClipboard';
 import useHotkeys from './hooks/useHotkeys';
 
 const DRAWING_ID = '__drawing__';
-const HANDLE_CURSOR: Record<string, string> = { nw: 'nwse-resize', se: 'nwse-resize', ne: 'nesw-resize', sw: 'nesw-resize' };
+const HANDLE_CURSOR: Record<string, string> = { nw: 'nwse-resize', se: 'nwse-resize', ne: 'nesw-resize', sw: 'nesw-resize', n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize' };
 
 export default function AnnotatorPage() {
   const { projectId, imageId } = useParams<{ projectId: string; imageId: string }>();
@@ -95,6 +96,9 @@ export default function AnnotatorPage() {
   const [showPromptModal, setShowPromptModal] = useState(false);
   const [promptText, setPromptText] = useState('car');
   const [promptBusy, setPromptBusy] = useState(false);
+
+  // Auto Label Modal
+  const [autoLabelOpen, setAutoLabelOpen] = useState(false);
 
   const handleRunPromptAutoLabel = async () => {
     if (!projectId || !promptText.trim()) return;
@@ -289,6 +293,29 @@ export default function AnnotatorPage() {
     scheduleSave(merged);
   }, [currentIndex, images, projectId, boxesRef, pushHistorySnapshot, setPrefillCount, setBoxes, scheduleSave, setCopyingLabels]);
 
+  const handleDeleteImage = useCallback(async () => {
+    if (!projectId || !imageId) return;
+    if (!window.confirm('Bạn có chắc chắn muốn xoá ảnh này? Hành động này không thể hoàn tác.')) return;
+    try {
+      const { api } = await import('../../api');
+      await api.deleteImage(projectId, imageId);
+      if (images.length <= 1) {
+        navigate(`/projects/${projectId}`);
+      } else {
+        const nextIdx = currentIndex < images.length - 1 ? currentIndex + 1 : currentIndex - 1;
+        const nextImage = images[nextIdx];
+        if (nextImage) {
+          navigate(`/projects/${projectId}/annotate/${nextImage.id}`);
+          window.location.reload();
+        } else {
+          navigate(`/projects/${projectId}`);
+        }
+      }
+    } catch (err: any) {
+      alert('Lỗi khi xoá ảnh: ' + err.message);
+    }
+  }, [projectId, imageId, images, currentIndex, navigate]);
+
   // Canvas drawing loop
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -360,18 +387,23 @@ export default function AnnotatorPage() {
       } else {
         const bx = b.x * s, by = b.y * s, bw = b.w * s, bh = b.h * s;
         ctx.lineWidth = isSelected ? 3 : 2;
-        ctx.strokeStyle = color;
+        ctx.strokeStyle = b.source === 'auto_prompt' ? '#3b82f6' : color;
         if (isMultiSelected && !isPrimary) ctx.setLineDash([6, 3]);
+        if (b.source === 'auto_prompt') ctx.setLineDash([8, 4]); // Dashed line for auto generated
         ctx.strokeRect(bx, by, bw, bh);
         ctx.setLineDash([]);
-        ctx.fillStyle = color + '33';
+        ctx.fillStyle = b.source === 'auto_prompt' ? 'rgba(59, 130, 246, 0.2)' : color + '33';
         ctx.fillRect(bx, by, bw, bh);
 
-        drawLabel(ctx, cls?.name || '?', color, bx, by);
+        const labelName = b.source === 'auto_prompt' ? `🤖 ${cls?.name || 'Auto'}` : (cls?.name || '?');
+        drawLabel(ctx, labelName, b.source === 'auto_prompt' ? '#3b82f6' : color, bx, by);
 
         if (showHandles) {
-          ctx.fillStyle = color;
-          for (const [hx, hy] of [[bx, by], [bx + bw, by], [bx, by + bh], [bx + bw, by + bh]]) {
+          ctx.fillStyle = b.source === 'auto_prompt' ? '#3b82f6' : color;
+          for (const [hx, hy] of [
+            [bx, by], [bx + bw, by], [bx, by + bh], [bx + bw, by + bh],
+            [bx + bw / 2, by], [bx + bw / 2, by + bh], [bx, by + bh / 2], [bx + bw, by + bh / 2]
+          ]) {
             ctx.fillRect(hx - HANDLE_SIZE / 2, hy - HANDLE_SIZE / 2, HANDLE_SIZE, HANDLE_SIZE);
           }
         }
@@ -441,10 +473,27 @@ export default function AnnotatorPage() {
     }
     const corners: [Handle, number, number][] = [
       ['nw', b.x, b.y], ['ne', b.x + b.w, b.y], ['sw', b.x, b.y + b.h], ['se', b.x + b.w, b.y + b.h],
+      ['n', b.x + b.w / 2, b.y], ['s', b.x + b.w / 2, b.y + b.h], ['w', b.x, b.y + b.h / 2], ['e', b.x + b.w, b.y + b.h / 2],
     ];
     for (const [h, cx, cy] of corners) {
       if (Math.abs(x - cx) <= tol && Math.abs(y - cy) <= tol) return h;
     }
+
+    const nearN = Math.abs(y - b.y) <= tol && x >= b.x && x <= b.x + b.w;
+    const nearS = Math.abs(y - (b.y + b.h)) <= tol && x >= b.x && x <= b.x + b.w;
+    const nearW = Math.abs(x - b.x) <= tol && y >= b.y && y <= b.y + b.h;
+    const nearE = Math.abs(x - (b.x + b.w)) <= tol && y >= b.y && y <= b.y + b.h;
+
+    if (nearN && nearW) return 'nw';
+    if (nearN && nearE) return 'ne';
+    if (nearS && nearW) return 'sw';
+    if (nearS && nearE) return 'se';
+
+    if (nearN) return 'n';
+    if (nearS) return 's';
+    if (nearW) return 'w';
+    if (nearE) return 'e';
+
     return null;
   };
 
@@ -709,6 +758,10 @@ export default function AnnotatorPage() {
         else if (drag.handle === 'ne') { pnw = x - orig.x; pnh = orig.y + orig.h - y; pny = y; }
         else if (drag.handle === 'sw') { pnw = orig.x + orig.w - x; pnh = y - orig.y; pnx = x; }
         else if (drag.handle === 'nw') { pnw = orig.x + orig.w - x; pnh = orig.y + orig.h - y; pnx = x; pny = y; }
+        else if (drag.handle === 'n') { pnh = orig.y + orig.h - y; pny = y; }
+        else if (drag.handle === 's') { pnh = y - orig.y; }
+        else if (drag.handle === 'w') { pnw = orig.x + orig.w - x; pnx = x; }
+        else if (drag.handle === 'e') { pnw = x - orig.x; }
         if (pnw < 0) { pnx += pnw; pnw = -pnw; }
         if (pnh < 0) { pny += pnh; pny = -pnh; }
       }
@@ -728,6 +781,10 @@ export default function AnnotatorPage() {
         else if (drag.handle === 'ne') { ax = orig.x; ay = orig.y + orig.h; }
         else if (drag.handle === 'sw') { ax = orig.x + orig.w; ay = orig.y; }
         else if (drag.handle === 'nw') { ax = orig.x + orig.w; ay = orig.y + orig.h; }
+        else if (drag.handle === 'n') { ax = orig.x; ay = orig.y + orig.h; }
+        else if (drag.handle === 's') { ax = orig.x; ay = orig.y; }
+        else if (drag.handle === 'w') { ax = orig.x + orig.w; ay = orig.y; }
+        else if (drag.handle === 'e') { ax = orig.x; ay = orig.y; }
       }
 
       // 3. Apply resize/scale to all boxes in selection group
@@ -1038,6 +1095,8 @@ export default function AnnotatorPage() {
         onApproveReview={handleApprove}
         onRejectReview={handleReject}
         onOpenPromptModal={() => setShowPromptModal(true)}
+        onOpenAutoLabel={() => setAutoLabelOpen(true)}
+        onDeleteImage={handleDeleteImage}
       />
 
       <PrefillBanner
@@ -1265,6 +1324,14 @@ export default function AnnotatorPage() {
             </div>
           </div>
         </div>
+      )}
+      {autoLabelOpen && project && image && (
+        <AutoLabelModal
+          projectId={project.id}
+          selectedImageIds={new Set([image.id])}
+          onClose={() => setAutoLabelOpen(false)}
+          onFinished={() => window.location.reload()}
+        />
       )}
     </div>
   );

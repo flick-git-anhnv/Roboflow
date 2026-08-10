@@ -767,35 +767,52 @@ router.post('/sam', (req, res) => {
 router.post('/prompt', (req, res) => {
   try {
     const { projectId } = req.params;
-    const { textPrompt, confidenceThreshold = 0.5, classId } = req.body;
+    const { textPrompt, confidenceThreshold = 0.5, classId, scope = 'all', overwrite = false, imageIds } = req.body;
 
-    if (!textPrompt || typeof textPrompt !== 'string') {
+    if (!textPrompt || typeof textPrompt !== 'string' || !textPrompt.trim()) {
       return res.status(400).json({ error: 'textPrompt is required' });
     }
 
-    const images = db.prepare("SELECT * FROM images WHERE project_id = ? AND (auto_label_status IS NULL OR auto_label_status != 'auto_labeled') LIMIT 50").all(projectId);
-    
+    const images = pickTargetImages(projectId, scope, !!overwrite, imageIds);
+
+    if (images.length === 0) {
+      return res.json({
+        success: true,
+        prompt: textPrompt,
+        imagesProcessed: 0,
+        annotationsCreated: 0,
+        message: 'Dự án chưa có ảnh nào để gán nhãn.'
+      });
+    }
+
     let targetClassId = classId;
     if (!targetClassId) {
-      const cls = db.prepare("SELECT id FROM classes WHERE project_id = ? AND lower(name) = lower(?)").get(projectId, textPrompt.trim());
-      if (cls) {
-        targetClassId = cls.id;
-      } else {
-        const firstCls = db.prepare("SELECT id FROM classes WHERE project_id = ? LIMIT 1").get(projectId);
-        targetClassId = firstCls ? firstCls.id : null;
+      let cls = db.prepare("SELECT id FROM classes WHERE project_id = ? AND lower(name) = lower(?)").get(projectId, textPrompt.trim());
+      if (!cls) {
+        const maxCls = db.prepare("SELECT MAX(sort_order) as maxId FROM classes WHERE project_id = ?").get(projectId);
+        const newClassNum = (maxCls && maxCls.maxId !== null && maxCls.maxId !== undefined) ? maxCls.maxId + 1 : 0;
+        const newClsId = nanoid();
+        db.prepare("INSERT INTO classes (id, project_id, sort_order, name, color) VALUES (?, ?, ?, ?, ?)").run(
+          newClsId, projectId, newClassNum, textPrompt.trim(), '#3b82f6'
+        );
+        cls = { id: newClsId };
       }
+      targetClassId = cls.id;
     }
 
     let createdCount = 0;
     const insertStmt = db.prepare(`
-      INSERT INTO annotations (id, image_id, class_id, x, y, width, height, source)
+      INSERT INTO annotations (id, image_id, class_id, x, y, w, h, source)
       VALUES (?, ?, ?, ?, ?, ?, ?, 'auto_prompt')
     `);
-    const updateImgStmt = db.prepare("UPDATE images SET auto_label_status = 'auto_labeled' WHERE id = ?");
+    const updateImgStmt = db.prepare("UPDATE images SET auto_label_status = 'auto_labeled', status = 'labeled' WHERE id = ?");
+    const deleteAnnotsStmt = db.prepare("DELETE FROM annotations WHERE image_id = ?");
 
     db.transaction(() => {
       for (const img of images) {
-        // Create 1-2 auto annotations per image matching prompt
+        if (overwrite) {
+          deleteAnnotsStmt.run(img.id);
+        }
         const count = 1 + (img.id.charCodeAt(0) % 2);
         for (let i = 0; i < count; i++) {
           const id = nanoid();
@@ -819,7 +836,7 @@ router.post('/prompt', (req, res) => {
     });
   } catch (err) {
     console.error('[prompt_autolabel] Error in POST /prompt:', err);
-    res.status(500).json({ error: 'Failed to run prompt auto-labeling' });
+    res.status(500).json({ error: 'Failed to run prompt auto-labeling: ' + err.message });
   }
 });
 

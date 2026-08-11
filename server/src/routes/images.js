@@ -52,7 +52,7 @@ const zipUpload = multer({
 // GET /api/projects/:projectId/images - Paginated & Filtered images API
 router.get('/', (req, res) => {
   const { projectId } = req.params;
-  const { status, split, classId, search, q, assignedTo, completed, page: pageParam, limit: limitParam } = req.query;
+  const { status, split, classId, search, q, assignedTo, completed, reviewStatus, page: pageParam, limit: limitParam } = req.query;
 
   const isPaginated = pageParam !== undefined || limitParam !== undefined;
 
@@ -115,6 +115,11 @@ router.get('/', (req, res) => {
     conditions.push('i.completed_at IS NULL');
   }
 
+  if (reviewStatus) {
+    conditions.push('i.review_status = ?');
+    params.push(reviewStatus);
+  }
+
   if (searchQuery && searchQuery.trim()) {
     conditions.push('(i.filename LIKE ? OR i.original_name LIKE ?)');
     const pattern = `%${searchQuery.trim()}%`;
@@ -122,8 +127,12 @@ router.get('/', (req, res) => {
   }
 
   if (classId) {
-    conditions.push('EXISTS (SELECT 1 FROM annotations a WHERE a.image_id = i.id AND a.class_id = ?)');
-    params.push(classId);
+    const classIds = classId.split(',').map((id) => id.trim()).filter(Boolean);
+    if (classIds.length > 0) {
+      const placeholders = classIds.map(() => '?').join(',');
+      conditions.push(`EXISTS (SELECT 1 FROM annotations a WHERE a.image_id = i.id AND a.class_id IN (${placeholders}))`);
+      params.push(...classIds);
+    }
   }
 
   const whereClause = conditions.join(' AND ');

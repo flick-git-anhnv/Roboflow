@@ -135,7 +135,20 @@ export const api = {
   deleteAllClasses: (projectId: string) =>
     request<void>(`/api/projects/${projectId}/classes`, { method: 'DELETE' }),
 
-  listImages: (projectId: string) => request<ImageItem[]>(`/api/projects/${projectId}/images?t=${Date.now()}`),
+  listImages: (projectId: string, params?: Record<string, string | null>) => {
+    let url = `/api/projects/${projectId}/images?t=${Date.now()}`;
+    if (params) {
+      const q = new URLSearchParams();
+      Object.entries(params).forEach(([key, val]) => {
+        if (val !== undefined && val !== null && val !== '') {
+          q.append(key, val);
+        }
+      });
+      const qs = q.toString();
+      if (qs) url += `&${qs}`;
+    }
+    return request<ImageItem[]>(url);
+  },
   getImage: (projectId: string, imageId: string) =>
     request<ImageWithAnnotations>(`/api/projects/${projectId}/images/${imageId}`),
   uploadImages: async (projectId: string, files: FileList | File[], checkDuplicate?: boolean) => {

@@ -11,6 +11,7 @@ interface ImageTileProps {
   onToggleSelect: (id: string, e: React.MouseEvent | React.ChangeEvent) => void;
   onChangeSplit: (img: ImageItem, split: Split, e: React.MouseEvent) => void;
   onRemoveImage: (img: ImageItem, e: React.MouseEvent) => void;
+  filterQuery?: string;
 }
 
 export const ImageTile: React.FC<ImageTileProps> = ({
@@ -21,9 +22,11 @@ export const ImageTile: React.FC<ImageTileProps> = ({
   onToggleSelect,
   onChangeSplit,
   onRemoveImage,
+  filterQuery,
 }) => {
+  const linkTo = `/projects/${projectId}/annotate/${img.id}${filterQuery ? `?${filterQuery}` : ''}`;
   return (
-    <Link to={`/projects/${projectId}/annotate/${img.id}`}
+    <Link to={linkTo}
       className={`image-tile ${img.status === 'labeled' ? 'labeled' : ''}`}>
       {isSelected && (
         <div style={{

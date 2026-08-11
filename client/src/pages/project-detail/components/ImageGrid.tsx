@@ -13,6 +13,7 @@ interface ImageGridProps {
   onChangeSplit: (img: ImageItem, split: Split, e: React.MouseEvent) => void;
   onRemoveImage: (img: ImageItem, e: React.MouseEvent) => void;
   gridSize?: 'small' | 'medium' | 'large';
+  filterQuery?: string;
 }
 
 export const ImageGrid: React.FC<ImageGridProps> = ({
@@ -26,6 +27,7 @@ export const ImageGrid: React.FC<ImageGridProps> = ({
   onChangeSplit,
   onRemoveImage,
   gridSize = 'medium',
+  filterQuery,
 }) => {
   if (images.length === 0) {
     return <div className="empty-state card">Chưa có ảnh nào trong project này.</div>;
@@ -47,6 +49,7 @@ export const ImageGrid: React.FC<ImageGridProps> = ({
           onToggleSelect={onToggleSelect}
           onChangeSplit={onChangeSplit}
           onRemoveImage={onRemoveImage}
+          filterQuery={filterQuery}
         />
       ))}
     </div>

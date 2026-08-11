@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { getCurrentUser, requestSamPolygon, requestPromptAutoLabel } from '../../api';
 import type { ClassLabel, Point } from '../../types';
 import type { Box, DragMode, Handle, Tool } from './types';
@@ -115,6 +115,18 @@ export default function AnnotatorPage() {
     }
   };
 
+  const [searchParams] = useSearchParams();
+  const filterParams = useMemo(() => {
+    return {
+      search: searchParams.get('search'),
+      status: searchParams.get('status'),
+      classId: searchParams.get('classId'),
+      split: searchParams.get('split'),
+      reviewStatus: searchParams.get('reviewStatus'),
+      completed: searchParams.get('completed'),
+    };
+  }, [searchParams]);
+
   // Core Data & API Hook
   const {
     project,
@@ -140,7 +152,7 @@ export default function AnnotatorPage() {
     handleReject,
     handleMarkDone,
     handleUnmarkDone,
-  } = useAnnotatorData(projectId, imageId);
+  } = useAnnotatorData(projectId, imageId, undefined, filterParams);
 
   // Undo/Redo Hook
   const {
@@ -202,11 +214,11 @@ export default function AnnotatorPage() {
 
   const goTo = useCallback((delta: number) => {
     const next = images[currentIndex + delta];
-    if (next) navigate(`/projects/${projectId}/annotate/${next.id}`);
+    if (next) navigate(`/projects/${projectId}/annotate/${next.id}${window.location.search}`);
   }, [images, currentIndex, navigate, projectId]);
 
   const goToImageId = useCallback((id: string) => {
-    navigate(`/projects/${projectId}/annotate/${id}`);
+    navigate(`/projects/${projectId}/annotate/${id}${window.location.search}`);
   }, [navigate, projectId]);
 
   const toggleFilmstrip = useCallback(() => {
@@ -308,7 +320,7 @@ export default function AnnotatorPage() {
         const nextIdx = currentIndex < images.length - 1 ? currentIndex + 1 : currentIndex - 1;
         const nextImage = images[nextIdx];
         if (nextImage) {
-          navigate(`/projects/${projectId}/annotate/${nextImage.id}`);
+          navigate(`/projects/${projectId}/annotate/${nextImage.id}${window.location.search}`);
           window.location.reload();
         } else {
           navigate(`/projects/${projectId}`);
@@ -972,7 +984,7 @@ export default function AnnotatorPage() {
 
     const next = images[currentIndex + 1];
     if (next) {
-      navigate(`/projects/${projectId}/annotate/${next.id}`);
+      navigate(`/projects/${projectId}/annotate/${next.id}${window.location.search}`);
     } else {
       alert('Đã gán nhãn xong ảnh cuối cùng của dự án. Quay lại trang chi tiết dự án.');
       navigate(`/projects/${projectId}`);
@@ -1016,7 +1028,7 @@ export default function AnnotatorPage() {
 
     const next = images[currentIndex + 1];
     if (next) {
-      navigate(`/projects/${projectId}/annotate/${next.id}`);
+      navigate(`/projects/${projectId}/annotate/${next.id}${window.location.search}`);
     } else {
       alert('Đã gán nhãn xong ảnh cuối cùng của dự án. Quay lại trang chi tiết dự án.');
       navigate(`/projects/${projectId}`);

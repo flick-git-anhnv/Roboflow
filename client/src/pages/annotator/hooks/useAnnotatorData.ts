@@ -8,6 +8,7 @@ export function useAnnotatorData(
   projectId?: string,
   imageId?: string,
   onClearHistory?: () => void,
+  filterParams?: Record<string, string | null>,
 ) {
   const [project, setProject] = useState<Project | null>(null);
   const [classes, setClasses] = useState<ClassLabel[]>([]);
@@ -25,6 +26,13 @@ export function useAnnotatorData(
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingSaveRef = useRef<(() => Promise<void>) | null>(null);
   const annotationVersionRef = useRef<number>(0);
+
+  const activeImageIdRef = useRef(imageId);
+  useEffect(() => {
+    activeImageIdRef.current = imageId;
+  }, [imageId]);
+
+  const activeSavePromiseRef = useRef<Promise<void> | null>(null);
 
   const flushSave = useCallback(async () => {
     if (saveTimer.current) {
@@ -46,8 +54,8 @@ export function useAnnotatorData(
       setClasses(cs);
       setActiveClassId((prev) => prev || cs[0]?.id || '');
     });
-    api.listImages(projectId).then(setImages);
-  }, [projectId]);
+    api.listImages(projectId, filterParams).then(setImages);
+  }, [projectId, filterParams]);
 
   // Fetch single image data
   useEffect(() => {
@@ -99,43 +107,74 @@ export function useAnnotatorData(
     setSaveState('dirty');
     if (saveTimer.current) clearTimeout(saveTimer.current);
 
-    const saveFn = async () => {
-      if (!imageId) return;
-      setSaveState('saving');
-      try {
-        const result = await api.saveAnnotations(
-          imageId,
-          nextBoxes.map((b) => ({
-            class_id: b.class_id, x: b.x, y: b.y, w: b.w, h: b.h,
-            type: b.type, points: b.type === 'quad' && b.points ? b.points : null,
-            text_content: b.text_content || null,
-          })),
-          annotationVersionRef.current,
-        );
-        annotationVersionRef.current = result.annotationVersion;
-        setSaveState('saved');
-        if (onClearHistory) onClearHistory();
-        setImages((imgs) => imgs.map((i) => (i.id === imageId ? { ...i, status: nextBoxes.length ? 'labeled' : 'unlabeled' } : i)));
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (msg === 'ANNOTATION_CONFLICT') {
-          setSaveState('saved');
-          alert('Ảnh này đã được người khác sửa. Đang tải lại bản mới nhất — thay đổi chưa lưu của bạn sẽ bị mất.');
-          if (projectId) {
-            api.getImage(projectId, imageId).then((img) => {
-              setImage(img);
-              setBoxes(img.annotations.map((a: Annotation) => annotationToBox(a)));
-              annotationVersionRef.current = img.annotationVersion ?? 0;
-              setSaveState('saved');
-              if (onClearHistory) onClearHistory();
-            }).catch(() => {});
-          }
-        } else {
-          setSaveState('dirty');
-          console.error('[AnnotatorPage] Save failed:', msg);
+    const executeSave = (boxesToSave: Box[]) => {
+      if (!imageId) return Promise.resolve();
+
+      const promise = (async () => {
+        if (imageId === activeImageIdRef.current) {
+          setSaveState('saving');
         }
+        try {
+          const result = await api.saveAnnotations(
+            imageId,
+            boxesToSave.map((b) => ({
+              class_id: b.class_id, x: b.x, y: b.y, w: b.w, h: b.h,
+              type: b.type, points: b.type === 'quad' && b.points ? b.points : null,
+              text_content: b.text_content || null,
+            })),
+            annotationVersionRef.current,
+          );
+          
+          if (imageId === activeImageIdRef.current) {
+            annotationVersionRef.current = result.annotationVersion;
+            setSaveState('saved');
+            if (onClearHistory) onClearHistory();
+          }
+          setImages((imgs) => imgs.map((i) => (i.id === imageId ? { ...i, status: boxesToSave.length ? 'labeled' : 'unlabeled' } : i)));
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (msg === 'ANNOTATION_CONFLICT') {
+            if (imageId === activeImageIdRef.current) {
+              setSaveState('saved');
+              alert('Ảnh này đã được người khác sửa. Đang tải lại bản mới nhất — thay đổi chưa lưu của bạn sẽ bị mất.');
+              if (projectId) {
+                api.getImage(projectId, imageId).then((img) => {
+                  if (imageId === activeImageIdRef.current) {
+                    setImage(img);
+                    setBoxes(img.annotations.map((a: Annotation) => annotationToBox(a)));
+                    annotationVersionRef.current = img.annotationVersion ?? 0;
+                    setSaveState('saved');
+                    if (onClearHistory) onClearHistory();
+                  }
+                }).catch(() => {});
+              }
+            }
+          } else {
+            if (imageId === activeImageIdRef.current) {
+              setSaveState('dirty');
+            }
+            console.error('[AnnotatorPage] Save failed:', msg);
+          }
+        }
+      })();
+
+      activeSavePromiseRef.current = promise;
+      promise.finally(() => {
+        if (activeSavePromiseRef.current === promise) {
+          activeSavePromiseRef.current = null;
+        }
+      });
+
+      return promise;
+    };
+
+    const saveFn = async () => {
+      if (activeSavePromiseRef.current) {
+        try {
+          await activeSavePromiseRef.current;
+        } catch {}
       }
-      pendingSaveRef.current = null;
+      await executeSave(nextBoxes);
     };
 
     pendingSaveRef.current = saveFn;

@@ -197,6 +197,17 @@ export default function ProjectDetailPage() {
 
   const labeledCount = images.filter((i) => i.status === 'labeled' || i.completed_at).length;
 
+  const filterQuery = useMemo(() => {
+    const params = new URLSearchParams();
+    if (search) params.set('search', search);
+    if (statusFilter !== 'all') params.set('status', statusFilter);
+    if (classFilter.length > 0) params.set('classId', classFilter.join(','));
+    if (splitFilter !== 'all') params.set('split', splitFilter);
+    if (reviewFilter !== 'all') params.set('reviewStatus', reviewFilter);
+    if (doneFilter !== 'all') params.set('completed', doneFilter === 'done' ? 'true' : 'false');
+    return params.toString();
+  }, [search, statusFilter, classFilter, splitFilter, reviewFilter, doneFilter]);
+
   return (
     <div className="project-detail-container">
         <ProjectDetailHeader
@@ -311,6 +322,7 @@ export default function ProjectDetailPage() {
               onChangeSplit={changeSplit}
               onRemoveImage={removeImage}
               gridSize={gridSize}
+              filterQuery={filterQuery}
             />
           </div>
 

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import type { ProjectStats, SplitPreview } from '../api';
+import type { ClassLabel, ImageItem } from '../types';
 
 type Format = 'yolo' | 'coco' | 'voc';
 type SplitMode = 'manual' | 'auto';
@@ -14,10 +15,95 @@ const FORMAT_INFO: Record<Format, { label: string; desc: string }> = {
 interface ExportModalProps {
   projectId: string;
   labelType?: string;
+  images?: ImageItem[];
+  classes?: ClassLabel[];
   onClose: () => void;
 }
 
-export default function ExportModal({ projectId, labelType, onClose }: ExportModalProps) {
+function computeClientSplitPreview(
+  images: ImageItem[],
+  classes: ClassLabel[] = [],
+  trainRatio: number,
+  completedOnly: boolean
+): SplitPreview {
+  const filtered = images.filter((i) =>
+    completedOnly ? i.completed_at != null : i.status === 'labeled'
+  );
+  const testImages = filtered.filter((i) => i.split === 'test');
+  const pool = filtered.filter((i) => i.split !== 'test');
+  const validRatio = 1 - trainRatio;
+
+  const classToImages = new Map<string, string[]>();
+  for (const img of pool) {
+    const cids = Array.isArray(img.class_ids) ? [...new Set(img.class_ids)] : [];
+    for (const cid of cids) {
+      if (!classToImages.has(cid)) classToImages.set(cid, []);
+      classToImages.get(cid)!.push(img.id);
+    }
+  }
+
+  const assignment = new Map<string, 'train' | 'valid'>();
+  const orderedClasses = [...classToImages.entries()].sort((a, b) => a[1].length - b[1].length);
+
+  for (const [, imgIds] of orderedClasses) {
+    let curValid = 0;
+    let curTrain = 0;
+    for (const id of imgIds) {
+      const ex = assignment.get(id);
+      if (ex === 'valid') curValid++;
+      else if (ex === 'train') curTrain++;
+    }
+    const count = imgIds.length;
+    const target = count === 1 ? 0 : Math.max(1, Math.min(count - 1, Math.round(count * validRatio)));
+    for (const id of imgIds) {
+      if (assignment.has(id)) continue;
+      const bucket = curValid < target ? 'valid' : 'train';
+      assignment.set(id, bucket);
+      if (bucket === 'valid') curValid++;
+      else curTrain++;
+    }
+  }
+
+  const unassigned = pool.filter((img) => !assignment.has(img.id));
+  const targetValid = Math.round(unassigned.length * validRatio);
+  unassigned.forEach((img, idx) => {
+    assignment.set(img.id, idx < targetValid ? 'valid' : 'train');
+  });
+
+  let trainCount = 0;
+  let validCount = 0;
+  const testCount = testImages.length;
+
+  const classMap = new Map<string, { class_id: string; name: string; train: number; valid: number }>();
+  for (const c of classes) {
+    classMap.set(c.id, { class_id: c.id, name: c.name, train: 0, valid: 0 });
+  }
+
+  for (const img of pool) {
+    const split = assignment.get(img.id) || 'train';
+    if (split === 'train') trainCount++;
+    else validCount++;
+
+    const cids = Array.isArray(img.class_ids) ? [...new Set(img.class_ids)] : [];
+    for (const cid of cids) {
+      let entry = classMap.get(cid);
+      if (!entry) {
+        entry = { class_id: cid, name: cid, train: 0, valid: 0 };
+        classMap.set(cid, entry);
+      }
+      entry[split]++;
+    }
+  }
+
+  return {
+    trainCount,
+    validCount,
+    testCount,
+    perClass: Array.from(classMap.values()),
+  };
+}
+
+export default function ExportModal({ projectId, labelType, images, classes, onClose }: ExportModalProps) {
   const [format, setFormat] = useState<Format>('yolo');
   const [splitMode, setSplitMode] = useState<SplitMode>('manual');
   const [trainRatio, setTrainRatio] = useState(0.8);
@@ -30,14 +116,27 @@ export default function ExportModal({ projectId, labelType, onClose }: ExportMod
     api.getStats(projectId).then(setStats).catch(() => {});
   }, [projectId]);
 
+  const completedCount = images
+    ? images.filter((i) => i.completed_at != null).length
+    : (stats?.completedImages ?? 0);
+  const labeledCount = images
+    ? images.filter((i) => i.status === 'labeled').length
+    : (stats?.labeledImages ?? 0);
+  const totalCount = images ? images.length : (stats?.totalImages ?? 0);
+  const hasData = Boolean(images || stats);
+
   useEffect(() => {
     if (splitMode !== 'auto') return;
+    if (images && images.length > 0) {
+      setPreview(computeClientSplitPreview(images, classes, trainRatio, completedOnly));
+      return;
+    }
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      api.getSplitPreview(projectId, trainRatio, completedOnly).then(setPreview);
+      api.getSplitPreview(projectId, trainRatio, completedOnly).then(setPreview).catch(() => {});
     }, 250);
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
-  }, [projectId, splitMode, trainRatio, completedOnly]);
+  }, [projectId, splitMode, trainRatio, completedOnly, images, classes]);
 
   const runExport = () => {
     const url = api.exportUrl(projectId, format, { mode: splitMode, trainRatio, completedOnly });
@@ -166,7 +265,7 @@ export default function ExportModal({ projectId, labelType, onClose }: ExportMod
                 Chỉ lấy những ảnh đã đánh dấu xong
               </span>
             </span>
-            {stats && (
+            {hasData && (
               <span
                 style={{
                   fontSize: '12px',
@@ -180,17 +279,17 @@ export default function ExportModal({ projectId, labelType, onClose }: ExportMod
                 }}
               >
                 {completedOnly
-                  ? `${stats.completedImages ?? 0} / ${stats.totalImages} ảnh đã xong`
-                  : `${stats.labeledImages} / ${stats.totalImages} ảnh đã gán nhãn`}
+                  ? `${completedCount} / ${totalCount} ảnh đã xong`
+                  : `${labeledCount} / ${totalCount} ảnh đã gán nhãn`}
               </span>
             )}
           </label>
-          {completedOnly && stats && (stats.completedImages ?? 0) === 0 && (
+          {completedOnly && hasData && completedCount === 0 && (
             <p style={{ fontSize: '12px', color: 'var(--danger, #d32f2f)', margin: '4px 0 0 24px' }}>
               ⚠️ Dự án hiện chưa có ảnh nào được đánh dấu xong.
             </p>
           )}
-          {!completedOnly && stats && stats.labeledImages === 0 && (
+          {!completedOnly && hasData && labeledCount === 0 && (
             <p style={{ fontSize: '12px', color: 'var(--danger, #d32f2f)', margin: '4px 0 0 24px' }}>
               ⚠️ Dự án hiện chưa có ảnh nào được gán nhãn.
             </p>
@@ -204,11 +303,11 @@ export default function ExportModal({ projectId, labelType, onClose }: ExportMod
             onClick={runExport}
             disabled={
               completedOnly
-                ? stats ? (stats.completedImages ?? 0) === 0 : false
-                : stats ? stats.labeledImages === 0 : false
+                ? hasData ? completedCount === 0 : false
+                : hasData ? labeledCount === 0 : false
             }
           >
-            Xuất dataset {stats ? `(${completedOnly ? (stats.completedImages ?? 0) : stats.labeledImages} ảnh)` : ''}
+            Xuất dataset {hasData ? `(${completedOnly ? completedCount : labeledCount} ảnh)` : ''}
           </button>
         </div>
       </div>

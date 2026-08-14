@@ -325,6 +325,8 @@ export default function ProjectDetailPage() {
         <ExportModal
           projectId={project.id}
           labelType={project.label_type}
+          images={images}
+          classes={classes}
           onClose={() => setExportOpen(false)}
         />
       )}

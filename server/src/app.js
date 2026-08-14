@@ -40,24 +40,39 @@ export const app = express();
 
 // 1. Helmet security headers
 app.use(helmet({
+  contentSecurityPolicy: false,
   crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));
 
 // 2. CORS configuration
-const CORS_ORIGIN = (process.env.CORS_ORIGIN || 'http://localhost:5173')
+const PORT = process.env.PORT || 4000;
+const CLIENT_PORT = process.env.CLIENT_PORT || '5173';
+const defaultOrigins = [
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  `http://localhost:${PORT}`,
+  `http://127.0.0.1:${PORT}`,
+];
+const envOrigins = (process.env.CORS_ORIGIN || '')
   .split(',').map((s) => s.trim()).filter(Boolean);
+const ALLOWED_ORIGINS = new Set([...defaultOrigins, ...envOrigins]);
 
 const IS_PROD = process.env.NODE_ENV === 'production';
-const CLIENT_PORT = process.env.CLIENT_PORT || '5173';
 const LAN_ORIGIN_RE = new RegExp(
-  `^https?://(192\\.168\\.\\d{1,3}\\.\\d{1,3}|10\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}|172\\.(1[6-9]|2\\d|3[01])\\.\\d{1,3}\\.\\d{1,3}):${CLIENT_PORT}$`
+  `^https?://(192\\.168\\.\\d{1,3}\\.\\d{1,3}|10\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}|172\\.(1[6-9]|2\\d|3[01])\\.\\d{1,3}\\.\\d{1,3}):(${CLIENT_PORT}|${PORT})$`
 );
 
 app.use(cors({
   origin: (origin, cb) => {
     if (!origin) return cb(null, true);
-    if (CORS_ORIGIN.includes(origin)) return cb(null, true);
+    if (ALLOWED_ORIGINS.has(origin)) return cb(null, true);
     if (!IS_PROD && LAN_ORIGIN_RE.test(origin)) return cb(null, true);
+    try {
+      const url = new URL(origin);
+      if (url.port === String(PORT) || url.port === String(CLIENT_PORT)) {
+        return cb(null, true);
+      }
+    } catch (_) {}
     return cb(new Error('CORS blocked: ' + origin));
   },
   credentials: true,

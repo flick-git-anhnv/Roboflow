@@ -174,7 +174,7 @@ export interface ProjectAssignment {
 export interface ProjectAssignmentSummary {
   assignments: ProjectAssignment[];
   totalPercent: number;
-  images: { total: number; assigned: number; unassigned: number };
+  images: { total: number; assigned: number; unassigned: number; done?: number; undone?: number };
 }
 export interface AssignmentCandidate {
   user_id: number;

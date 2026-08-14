@@ -36,4 +36,35 @@ describe('PaginationControls Component', () => {
     const nextButton = screen.getByText('Sau ›');
     expect(nextButton).toBeDisabled();
   });
+
+  it('allows entering page number and jumping to that page', () => {
+    const handleChange = vi.fn();
+    render(<PaginationControls page={1} pageCount={10} onChange={handleChange} />);
+
+    const input = screen.getByLabelText('Nhập số trang');
+    const submitBtn = screen.getByText('Đi');
+
+    // Type 7 and submit
+    fireEvent.change(input, { target: { value: '7' } });
+    fireEvent.click(submitBtn);
+
+    expect(handleChange).toHaveBeenCalledWith(7);
+  });
+
+  it('clamps entered page number within valid range (1 to pageCount)', () => {
+    const handleChange = vi.fn();
+    render(<PaginationControls page={1} pageCount={10} onChange={handleChange} />);
+
+    const input = screen.getByLabelText('Nhập số trang');
+
+    // Enter out of bound page (> 10)
+    fireEvent.change(input, { target: { value: '99' } });
+    fireEvent.submit(input.closest('form')!);
+    expect(handleChange).toHaveBeenCalledWith(10);
+
+    // Enter negative / 0 page (< 1)
+    fireEvent.change(input, { target: { value: '0' } });
+    fireEvent.submit(input.closest('form')!);
+    expect(handleChange).toHaveBeenCalledWith(1);
+  });
 });

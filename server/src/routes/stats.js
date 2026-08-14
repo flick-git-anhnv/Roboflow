@@ -28,7 +28,8 @@ router.get('/', (req, res) => {
   }));
 
   const totalAnnotations = perClass.reduce((sum, c) => sum + c.count, 0);
-  const labeledImages = images.filter((i) => i.status === 'labeled' || i.completed_at).length;
+  const completedImages = images.filter((i) => i.completed_at != null).length;
+  const labeledImages = images.filter((i) => i.status === 'labeled').length;
   const bySplit = { train: 0, valid: 0, test: 0 };
   for (const img of images) {
     const s = ['train', 'valid', 'test'].includes(img.split) ? img.split : 'train';
@@ -37,6 +38,7 @@ router.get('/', (req, res) => {
 
   res.json({
     totalImages: images.length,
+    completedImages,
     labeledImages,
     unlabeledImages: images.length - labeledImages,
     totalAnnotations,

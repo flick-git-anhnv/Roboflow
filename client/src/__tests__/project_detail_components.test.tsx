@@ -5,6 +5,8 @@ import ProjectDetailHeader from '../pages/project-detail/components/ProjectDetai
 import ClassManagerPanel from '../pages/project-detail/components/ClassManagerPanel';
 import UploadDropzone from '../pages/project-detail/components/UploadDropzone';
 import BatchActionsBar from '../pages/project-detail/components/BatchActionsBar';
+import ExportModal from '../components/ExportModal';
+import { api } from '../api';
 import type { ClassLabel, ImageItem, Project } from '../types';
 
 describe('Project Detail Components', () => {
@@ -114,5 +116,47 @@ describe('Project Detail Components', () => {
 
     expect(screen.getByText('Đã chọn 2 ảnh')).toBeInTheDocument();
     expect(screen.getByText('🗑 Xoá 2 ảnh')).toBeInTheDocument();
+  });
+
+  it('renders ExportModal with completedOnly checkbox and handles export with completedOnly', async () => {
+    const onClose = vi.fn();
+    const statsSpy = vi.spyOn(api, 'getStats').mockResolvedValue({
+      totalImages: 100,
+      completedImages: 45,
+      labeledImages: 50,
+      unlabeledImages: 50,
+      totalAnnotations: 120,
+      bySplit: { train: 80, valid: 15, test: 5 },
+      perClass: [],
+    });
+    const exportSpy = vi.spyOn(api, 'exportUrl').mockReturnValue('/api/projects/p1/export?format=yolo&completedOnly=true');
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+
+    render(<ExportModal projectId="p1" onClose={onClose} />);
+
+    expect(screen.getByText('⬇ Export dataset')).toBeInTheDocument();
+    const checkbox = screen.getByLabelText('Chỉ lấy những ảnh đã đánh dấu xong') as HTMLInputElement;
+    expect(checkbox).toBeInTheDocument();
+    expect(await screen.findByText('50 / 100 ảnh đã gán nhãn')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Xuất dataset \(50 ảnh\)/ })).toBeInTheDocument();
+
+    fireEvent.click(checkbox);
+    expect(checkbox.checked).toBe(true);
+    expect(screen.getByText('45 / 100 ảnh đã xong')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Xuất dataset \(45 ảnh\)/ })).toBeInTheDocument();
+
+    const exportBtn = screen.getByRole('button', { name: /Xuất dataset \(45 ảnh\)/ });
+    fireEvent.click(exportBtn);
+
+    expect(exportSpy).toHaveBeenCalledWith('p1', 'yolo', {
+      mode: 'manual',
+      trainRatio: 0.8,
+      completedOnly: true,
+    });
+    expect(clickSpy).toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalled();
+    exportSpy.mockRestore();
+    clickSpy.mockRestore();
+    statsSpy.mockRestore();
   });
 });

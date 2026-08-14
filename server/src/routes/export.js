@@ -6,10 +6,18 @@ import { db, UPLOAD_DIR, logActivity } from '../db.js';
 
 const router = Router({ mergeParams: true });
 
-function loadData(projectId) {
+function loadData(projectId, options = {}) {
   const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId);
   const classes = db.prepare('SELECT * FROM classes WHERE project_id = ? ORDER BY sort_order ASC').all(projectId);
-  const images = db.prepare('SELECT * FROM images WHERE project_id = ? ORDER BY created_at ASC').all(projectId);
+  let query = 'SELECT * FROM images WHERE project_id = ?';
+  const params = [projectId];
+  if (options.completedOnly) {
+    query += ' AND completed_at IS NOT NULL';
+  } else {
+    query += " AND status = 'labeled'";
+  }
+  query += ' ORDER BY created_at ASC';
+  const images = db.prepare(query).all(...params);
   const classIndex = new Map(classes.map((c, i) => [c.id, i]));
   const annotationsByImage = new Map();
   for (const img of images) {
@@ -84,7 +92,8 @@ function stratifiedSplit(images, annotationsByImage, trainRatio) {
 
 router.get('/split-preview', (req, res) => {
   const trainRatio = Math.min(0.95, Math.max(0.5, parseFloat(req.query.trainRatio) || 0.8));
-  const { project, classes, images, annotationsByImage } = loadData(req.params.projectId);
+  const completedOnly = req.query.completedOnly === 'true' || req.query.onlyDone === 'true';
+  const { project, classes, images, annotationsByImage } = loadData(req.params.projectId, { completedOnly });
   if (!project) return res.status(404).json({ error: 'Không tìm thấy project' });
 
   const assignment = stratifiedSplit(images, annotationsByImage, trainRatio);
@@ -115,9 +124,16 @@ router.get('/', (req, res) => {
   const format = (req.query.format || 'yolo').toLowerCase();
   const splitMode = (req.query.splitMode || 'manual').toLowerCase();
   const trainRatio = Math.min(0.95, Math.max(0.5, parseFloat(req.query.trainRatio) || 0.8));
-  const { project, classes, images, classIndex, annotationsByImage } = loadData(req.params.projectId);
+  const completedOnly = req.query.completedOnly === 'true' || req.query.onlyDone === 'true';
+  const { project, classes, images, classIndex, annotationsByImage } = loadData(req.params.projectId, { completedOnly });
   if (!project) return res.status(404).json({ error: 'Không tìm thấy project' });
-  if (!images.length) return res.status(400).json({ error: 'Project chưa có ảnh nào để export' });
+  if (!images.length) {
+    return res.status(400).json({
+      error: completedOnly
+        ? 'Project không có ảnh nào đã đánh dấu xong để export'
+        : 'Project không có ảnh nào đã được gán nhãn để export',
+    });
+  }
 
   const autoAssignment = splitMode === 'auto' ? stratifiedSplit(images, annotationsByImage, trainRatio) : null;
   const getSplit = autoAssignment
@@ -278,6 +294,7 @@ router.get('/', (req, res) => {
   logActivity(req.params.projectId, req.user?.id ?? null, 'export', {
     format,
     count: images.length,
+    completedOnly,
   });
 
   archive.finalize();

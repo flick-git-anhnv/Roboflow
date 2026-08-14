@@ -12,6 +12,7 @@ interface AnnotationListPanelProps {
   hoveredId?: string | null;
   onSelectOnly: (id: string | null) => void;
   onUpdateBoxes: (updater: (prev: Box[]) => Box[]) => void;
+  onClearAllBoxes?: () => void;
   onHoverBox?: (id: string | null) => void;
 }
 
@@ -23,13 +24,33 @@ export const AnnotationListPanel: React.FC<AnnotationListPanelProps> = ({
   hoveredId,
   onSelectOnly,
   onUpdateBoxes,
+  onClearAllBoxes,
   onHoverBox,
 }) => {
   const visibleBoxes = boxes.filter((b) => b.id !== DRAWING_ID);
 
   return (
     <div className="side-panel" style={{ position: 'static' }}>
-      <h4>Annotations ({visibleBoxes.length})</h4>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+        <h4 style={{ margin: 0 }}>Annotations ({visibleBoxes.length})</h4>
+        {visibleBoxes.length > 0 && onClearAllBoxes && (
+          <button
+            className="btn btn-outline"
+            onClick={onClearAllBoxes}
+            title="Xoá tất cả nhãn trong hình (Shift+Delete)"
+            style={{
+              fontSize: 11,
+              padding: '2px 6px',
+              color: '#dc2626',
+              borderColor: '#dc2626',
+              borderRadius: 4,
+              cursor: 'pointer',
+            }}
+          >
+            🗑️ Xoá tất cả
+          </button>
+        )}
+      </div>
       <div className="class-list-scroll">
         {visibleBoxes.map((b) => {
           const cls = classById.get(b.class_id);

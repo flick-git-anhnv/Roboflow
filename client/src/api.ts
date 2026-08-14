@@ -173,8 +173,10 @@ export const api = {
 
   exportUrl: (projectId: string, format: 'yolo' | 'coco' | 'voc', splitOptions?: SplitOptions) =>
     `/api/projects/${projectId}/export?format=${format}${splitQuery(splitOptions)}`,
-  getSplitPreview: (projectId: string, trainRatio: number) =>
-    request<SplitPreview>(`/api/projects/${projectId}/export/split-preview?trainRatio=${trainRatio}`),
+  getSplitPreview: (projectId: string, trainRatio: number, completedOnly?: boolean) =>
+    request<SplitPreview>(
+      `/api/projects/${projectId}/export/split-preview?trainRatio=${trainRatio}${completedOnly ? '&completedOnly=true' : ''}`
+    ),
 
   getStats: (projectId: string) => request<ProjectStats>(`/api/projects/${projectId}/stats`),
 
@@ -344,11 +346,19 @@ export const api = {
 export interface SplitOptions {
   mode: 'manual' | 'auto';
   trainRatio: number;
+  completedOnly?: boolean;
 }
 
 function splitQuery(opts?: SplitOptions) {
-  if (!opts || opts.mode === 'manual') return '';
-  return `&splitMode=auto&trainRatio=${opts.trainRatio}`;
+  if (!opts) return '';
+  let q = '';
+  if (opts.mode === 'auto') {
+    q += `&splitMode=auto&trainRatio=${opts.trainRatio}`;
+  }
+  if (opts.completedOnly) {
+    q += '&completedOnly=true';
+  }
+  return q;
 }
 
 export interface SplitPreview {
@@ -360,6 +370,7 @@ export interface SplitPreview {
 
 export interface ProjectStats {
   totalImages: number;
+  completedImages?: number;
   labeledImages: number;
   unlabeledImages: number;
   totalAnnotations: number;

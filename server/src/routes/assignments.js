@@ -19,6 +19,7 @@ function shuffle(arr) {
 // Trả về % đã đặt + tiến độ thực tế (đã gán / đã xong) cho từng user có % > 0
 // hoặc đã có ảnh được gán trong project — không liệt kê toàn bộ user hệ thống
 // để tránh nhiễu khi project chưa cấu hình phân công.
+// Tiến độ (done_count) CHỈ tính trên các ảnh đã đánh dấu là xong (completed_at IS NOT NULL).
 router.get('/', (req, res) => {
   const { projectId } = req.params;
   const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(projectId);
@@ -40,7 +41,9 @@ router.get('/', (req, res) => {
   const totals = db.prepare(`
     SELECT COUNT(*) AS total,
       SUM(CASE WHEN assigned_to IS NOT NULL THEN 1 ELSE 0 END) AS assigned_total,
-      SUM(CASE WHEN assigned_to IS NULL THEN 1 ELSE 0 END) AS unassigned_total
+      SUM(CASE WHEN assigned_to IS NULL THEN 1 ELSE 0 END) AS unassigned_total,
+      SUM(CASE WHEN completed_at IS NOT NULL THEN 1 ELSE 0 END) AS done_total,
+      SUM(CASE WHEN completed_at IS NULL THEN 1 ELSE 0 END) AS undone_total
     FROM images WHERE project_id = ?
   `).get(projectId);
 
@@ -51,6 +54,8 @@ router.get('/', (req, res) => {
       total: totals.total || 0,
       assigned: totals.assigned_total || 0,
       unassigned: totals.unassigned_total || 0,
+      done: totals.done_total || 0,
+      undone: totals.undone_total || 0,
     },
   });
 });
@@ -111,11 +116,11 @@ router.delete('/:userId', requireRole('admin'), (req, res) => {
 // POST /api/projects/:projectId/assignments/distribute — admin only.
 // % là tỉ lệ TUYỆT ĐỐI trên TỔNG số ảnh của project (không phải % tương đối
 // giữa các user có percent>0) — VD: 100 ảnh, A=50% nghĩa là A cần có ĐÚNG 50
-// ảnh được gán, dù B/C có đặt % hay không. Mỗi lần "Chia ảnh" chỉ TOP-UP phần
-// còn THIẾU so với target (target - số đã gán hiện tại), lấy ngẫu nhiên từ
-// ảnh CHƯA gán — KHÔNG bao giờ động vào ảnh đã gán từ trước (không xáo trộn
-// việc user khác đang làm dở). Nếu tổng % < 100, phần dư mãi không có ai đạt
-// target sẽ tự nhiên còn lại "chưa gán ai" — đúng như thiết kế cho phép tự do.
+// ảnh được gán, dù B/C có đặt % hay không.
+// Khi "Chia ảnh", hệ thống sẽ:
+// 1. Giữ nguyên 100% các ảnh đã đánh dấu xong (completed_at IS NOT NULL).
+// 2. Thu hồi các ảnh chưa hoàn thành vượt mức (excess) từ những user đang có nhiều hơn % mục tiêu.
+// 3. Phân bổ pool ảnh chưa hoàn thành cho các user còn thiếu theo Largest Remainder Method.
 router.post('/distribute', requireRole('admin'), (req, res) => {
   const { projectId } = req.params;
   const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(projectId);
@@ -133,77 +138,120 @@ router.post('/distribute', requireRole('admin'), (req, res) => {
     return res.json({ ok: true, distributed: 0, message: 'Project chưa có ảnh nào' });
   }
 
-  const unassignedIds = shuffle(db.prepare(
-    'SELECT id FROM images WHERE project_id = ? AND assigned_to IS NULL ORDER BY created_at ASC'
-  ).all(projectId).map((r) => r.id));
-
-  if (unassignedIds.length === 0) {
-    return res.json({ ok: true, distributed: 0, message: 'Không còn ảnh nào chưa gán' });
-  }
-
-  const currentAssigned = new Map(db.prepare(`
+  // Số ảnh ĐÃ HOÀN THÀNH của từng user (bảo toàn 100%, không bao giờ thay đổi hoặc gỡ)
+  const doneCounts = new Map(db.prepare(`
     SELECT assigned_to AS user_id, COUNT(*) AS n FROM images
-    WHERE project_id = ? AND assigned_to IS NOT NULL GROUP BY assigned_to
+    WHERE project_id = ? AND assigned_to IS NOT NULL AND completed_at IS NOT NULL
+    GROUP BY assigned_to
   `).all(projectId).map((r) => [r.user_id, r.n]));
 
-  const needs = percents
-    .map((p) => {
-      const target = Math.round((p.percent / 100) * totalImages);
-      const current = currentAssigned.get(p.user_id) || 0;
-      return { user_id: p.user_id, need: Math.max(0, target - current) };
-    })
-    .filter((n) => n.need > 0);
+  // Số ảnh CHƯA HOÀN THÀNH đang được gán cho từng user
+  const undoneCounts = new Map(db.prepare(`
+    SELECT assigned_to AS user_id, COUNT(*) AS n FROM images
+    WHERE project_id = ? AND assigned_to IS NOT NULL AND completed_at IS NULL
+    GROUP BY assigned_to
+  `).all(projectId).map((r) => [r.user_id, r.n]));
 
-  if (needs.length === 0) {
+  // Tính target, need (thiếu), excess (thừa ảnh chưa hoàn thành)
+  const userStats = percents.map((p) => {
+    const target = Math.round((p.percent / 100) * totalImages);
+    const done = doneCounts.get(p.user_id) || 0;
+    const undone = undoneCounts.get(p.user_id) || 0;
+    const current = done + undone;
+    const need = Math.max(0, target - current);
+    const excess = Math.max(0, Math.min(undone, current - target));
+    return { user_id: p.user_id, target, done, undone, current, need, excess };
+  });
+
+  const totalNeed = userStats.reduce((s, u) => s + u.need, 0);
+
+  // Số ảnh chưa gán và chưa hoàn thành trong project
+  const unassignedUndone = db.prepare(`
+    SELECT COUNT(*) AS n FROM images
+    WHERE project_id = ? AND assigned_to IS NULL AND completed_at IS NULL
+  `).get(projectId).n;
+
+  if (totalNeed === 0 && unassignedUndone === 0) {
     return res.json({ ok: true, distributed: 0, message: 'Mọi user đã đạt hoặc vượt % mục tiêu — không cần chia thêm' });
   }
 
-  const totalNeed = needs.reduce((s, n) => s + n.need, 0);
-  const pool = unassignedIds.slice(0, Math.min(totalNeed, unassignedIds.length));
+  const unassignStmt = db.prepare('UPDATE images SET assigned_to = NULL WHERE id = ?');
+  const updateStmt = db.prepare('UPDATE images SET assigned_to = ? WHERE id = ?');
 
-  // Đủ ảnh cho mọi nhu cầu → giao đúng số cần. Thiếu ảnh → largest-remainder
-  // để chia phần còn lại công bằng nhất theo đúng tỉ lệ nhu cầu của từng người.
-  let quotas;
-  if (totalNeed <= pool.length) {
-    quotas = needs.map((n) => ({ user_id: n.user_id, base: n.need }));
-  } else {
-    quotas = needs.map((n) => {
-      const exact = (n.need / totalNeed) * pool.length;
-      return { user_id: n.user_id, base: Math.floor(exact), remainder: exact - Math.floor(exact) };
-    });
-    const assignedSoFar = quotas.reduce((s, q) => s + q.base, 0);
-    const leftover = pool.length - assignedSoFar;
-    quotas.sort((a, b) => b.remainder - a.remainder);
-    for (let i = 0; i < leftover; i++) quotas[i % quotas.length].base += 1;
-  }
-
-  const update = db.prepare('UPDATE images SET assigned_to = ? WHERE id = ?');
-  let cursor = 0;
   const summary = [];
   db.transaction(() => {
+    // 1. Thu hồi excess từ các user có thừa ảnh chưa xong
+    for (const u of userStats) {
+      if (u.excess > 0) {
+        const excessImgs = db.prepare(`
+          SELECT id FROM images
+          WHERE project_id = ? AND assigned_to = ? AND completed_at IS NULL
+          LIMIT ?
+        `).all(projectId, u.user_id, u.excess);
+        for (const img of excessImgs) {
+          unassignStmt.run(img.id);
+        }
+      }
+    }
+
+    // 2. Lấy toàn bộ pool ảnh chưa gán và chưa xong để phân bổ
+    const pool = shuffle(db.prepare(`
+      SELECT id FROM images
+      WHERE project_id = ? AND assigned_to IS NULL AND completed_at IS NULL
+      ORDER BY created_at ASC
+    `).all(projectId).map((r) => r.id));
+
+    if (pool.length === 0 || totalNeed === 0) return;
+
+    // 3. Phân bổ cho các user có need > 0
+    const needyUsers = userStats.filter((u) => u.need > 0);
+    const effectivePool = pool.slice(0, Math.min(totalNeed, pool.length));
+
+    let quotas;
+    if (totalNeed <= effectivePool.length) {
+      quotas = needyUsers.map((n) => ({ user_id: n.user_id, base: n.need }));
+    } else {
+      quotas = needyUsers.map((n) => {
+        const exact = (n.need / totalNeed) * effectivePool.length;
+        return { user_id: n.user_id, base: Math.floor(exact), remainder: exact - Math.floor(exact) };
+      });
+      const assignedSoFar = quotas.reduce((s, q) => s + q.base, 0);
+      const leftover = effectivePool.length - assignedSoFar;
+      quotas.sort((a, b) => b.remainder - a.remainder);
+      for (let i = 0; i < leftover; i++) quotas[i % quotas.length].base += 1;
+    }
+
+    let cursor = 0;
     for (const q of quotas) {
-      const slice = pool.slice(cursor, cursor + q.base);
+      if (q.base <= 0) continue;
+      const slice = effectivePool.slice(cursor, cursor + q.base);
       cursor += q.base;
-      for (const imgId of slice) update.run(q.user_id, imgId);
-      if (slice.length > 0) summary.push({ user_id: q.user_id, assigned: slice.length });
+      for (const imgId of slice) updateStmt.run(q.user_id, imgId);
+      summary.push({ user_id: q.user_id, assigned: slice.length });
     }
   })();
 
-  logActivity(projectId, req.user.id, 'assignment_distributed', { summary, poolSize: pool.length, totalImages });
-  res.json({ ok: true, distributed: pool.length, summary });
+  const distributedCount = summary.reduce((s, r) => s + r.assigned, 0);
+  logActivity(projectId, req.user.id, 'assignment_distributed', { summary, distributed: distributedCount, totalImages });
+  res.json({ ok: true, distributed: distributedCount, summary });
 });
 
 // POST /api/projects/:projectId/assignments/reset — admin only.
-// Gỡ gán TOÀN BỘ ảnh trong project (assigned_to = NULL) để chia lại từ đầu.
+// Gỡ gán các ảnh CHƯA HOÀN THÀNH (completed_at IS NULL) trong project để chia lại.
+// BỎ QUA các ảnh đã đánh dấu xong (completed_at IS NOT NULL) — giữ nguyên quyền sở hữu công việc đã làm.
 // KHÔNG xoá % đã lưu trong project_assignments (giữ lại để admin chỉnh rồi chia lại).
 router.post('/reset', requireRole('admin'), (req, res) => {
   const { projectId } = req.params;
   const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(projectId);
   if (!project) return res.status(404).json({ error: 'Không tìm thấy project' });
 
-  const { changes } = db.prepare(
-    'UPDATE images SET assigned_to = NULL WHERE project_id = ? AND assigned_to IS NOT NULL'
-  ).run(projectId);
+  const { changes } = db.prepare(`
+    UPDATE images 
+    SET assigned_to = NULL 
+    WHERE project_id = ? 
+      AND assigned_to IS NOT NULL 
+      AND completed_at IS NULL
+  `).run(projectId);
 
   logActivity(projectId, req.user.id, 'assignment_reset', { unassigned: changes });
   res.json({ ok: true, unassigned: changes });

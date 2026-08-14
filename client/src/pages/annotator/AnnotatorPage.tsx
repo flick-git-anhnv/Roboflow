@@ -140,6 +140,7 @@ export default function AnnotatorPage() {
     handleReject,
     handleMarkDone,
     handleUnmarkDone,
+    removeImageFromList,
   } = useAnnotatorData(projectId, imageId);
 
   // Undo/Redo Hook
@@ -296,20 +297,60 @@ export default function AnnotatorPage() {
     scheduleSave(merged);
   }, [currentIndex, images, projectId, boxesRef, pushHistorySnapshot, setPrefillCount, setBoxes, scheduleSave, setCopyingLabels]);
 
+  const copyImageToClipboard = useCallback(async () => {
+    if (!projectId || !image) return;
+    const imageUrl = `/uploads/${projectId}/${image.filename}`;
+    try {
+      const response = await fetch(imageUrl);
+      const blob = await response.blob();
+      let copyBlob = blob;
+      if (blob.type !== 'image/png') {
+        const img = new Image();
+        img.src = imageUrl;
+        await new Promise((resolve, reject) => {
+          img.onload = resolve;
+          img.onerror = reject;
+        });
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0);
+          const pngBlob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+          if (pngBlob) {
+            copyBlob = pngBlob;
+          }
+        }
+      }
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          [copyBlob.type]: copyBlob
+        })
+      ]);
+      alert('Đã copy ảnh vào clipboard!');
+    } catch (err: any) {
+      alert('Không thể copy ảnh: ' + err.message);
+    }
+  }, [projectId, image]);
+
   const handleDeleteImage = useCallback(async () => {
     if (!projectId || !imageId) return;
     if (!window.confirm('Bạn có chắc chắn muốn xoá ảnh này? Hành động này không thể hoàn tác.')) return;
     try {
       const { api } = await import('../../api');
       await api.deleteImage(projectId, imageId);
-      if (images.length <= 1) {
+
+      const remainingImages = images.filter((img) => img.id !== imageId);
+      removeImageFromList(imageId);
+
+      if (remainingImages.length === 0) {
         navigate(`/projects/${projectId}`);
       } else {
-        const nextIdx = currentIndex < images.length - 1 ? currentIndex + 1 : currentIndex - 1;
-        const nextImage = images[nextIdx];
+        const nextIdx = currentIndex < remainingImages.length ? currentIndex : remainingImages.length - 1;
+        const nextImage = remainingImages[nextIdx];
         if (nextImage) {
           navigate(`/projects/${projectId}/annotate/${nextImage.id}`);
-          window.location.reload();
         } else {
           navigate(`/projects/${projectId}`);
         }
@@ -317,7 +358,7 @@ export default function AnnotatorPage() {
     } catch (err: any) {
       alert('Lỗi khi xoá ảnh: ' + err.message);
     }
-  }, [projectId, imageId, images, currentIndex, navigate]);
+  }, [projectId, imageId, images, currentIndex, navigate, removeImageFromList]);
 
   // Canvas drawing loop
   const draw = useCallback(() => {
@@ -365,7 +406,7 @@ export default function AnnotatorPage() {
       const isPrimary = b.id === selectedId;
       const isMultiSelected = selectedIds.has(b.id);
       const isSelected = isPrimary || isMultiSelected;
-      const showHandles = isPrimary;
+      const showHandles = isSelected;
 
       if ((b.type === 'quad' || b.type === 'sam_smart_polygon') && b.points) {
         const pts = b.points.map((p) => ({ x: p.x * s, y: p.y * s }));
@@ -467,7 +508,7 @@ export default function AnnotatorPage() {
   };
 
   const hitTestHandle = (b: Box, x: number, y: number): Handle => {
-    const tol = HANDLE_SIZE / scale;
+    const tol = Math.max(HANDLE_SIZE, 8) / scale;
     if (b.type === 'quad' && b.points) {
       for (let i = 0; i < b.points.length; i++) {
         if (Math.abs(x - b.points[i].x) <= tol && Math.abs(y - b.points[i].y) <= tol) return i;
@@ -481,21 +522,6 @@ export default function AnnotatorPage() {
     for (const [h, cx, cy] of corners) {
       if (Math.abs(x - cx) <= tol && Math.abs(y - cy) <= tol) return h;
     }
-
-    const nearN = Math.abs(y - b.y) <= tol && x >= b.x && x <= b.x + b.w;
-    const nearS = Math.abs(y - (b.y + b.h)) <= tol && x >= b.x && x <= b.x + b.w;
-    const nearW = Math.abs(x - b.x) <= tol && y >= b.y && y <= b.y + b.h;
-    const nearE = Math.abs(x - (b.x + b.w)) <= tol && y >= b.y && y <= b.y + b.h;
-
-    if (nearN && nearW) return 'nw';
-    if (nearN && nearE) return 'ne';
-    if (nearS && nearW) return 'sw';
-    if (nearS && nearE) return 'se';
-
-    if (nearN) return 'n';
-    if (nearS) return 's';
-    if (nearW) return 'w';
-    if (nearE) return 'e';
 
     return null;
   };
@@ -565,20 +591,20 @@ export default function AnnotatorPage() {
       return;
     }
 
-    if (selectedId) {
-      const sel = boxes.find((b) => b.id === selectedId);
-      if (sel) {
+    if (selectedIds.size > 0 || selectedId) {
+      const selectedBoxes = boxes.filter((b) => selectedIds.has(b.id) || b.id === selectedId);
+      for (const sel of selectedBoxes) {
         const handle = hitTestHandle(sel, x, y);
         if (handle !== null) {
           preDragSnapshotRef.current = boxesRef.current.map(cloneBox);
-          const isGroupResize = selectedIds.size > 1 && selectedIds.has(sel.id);
+          const isGroupResize = selectedIds.size > 1;
           dragRef.current = {
             mode: 'resize',
             handle,
             startX: x,
             startY: y,
             orig: cloneBox(sel),
-            groupOrig: isGroupResize ? boxesRef.current.filter((b) => selectedIds.has(b.id)).map(cloneBox) : undefined,
+            groupOrig: isGroupResize ? boxesRef.current.filter((b) => selectedIds.has(b.id) || b.id === selectedId).map(cloneBox) : undefined,
           };
           attachWindowDragListeners();
           return;
@@ -587,6 +613,19 @@ export default function AnnotatorPage() {
     }
     const hit = hitTestBox(x, y);
     const multiKey = e.shiftKey || e.ctrlKey || e.metaKey;
+    const isRightClick = e.button === 2;
+
+    if (isRightClick || (multiKey && !hit)) {
+      e.preventDefault();
+      if (!multiKey) {
+        selectOnly(null);
+      }
+      dragRef.current = { mode: 'select', handle: null, startX: x, startY: y };
+      selectRectRef.current = { x0: x, y0: y, x1: x, y1: y };
+      setSelectRect(selectRectRef.current);
+      attachWindowDragListeners();
+      return;
+    }
 
     if (hit) {
       if (multiKey) {
@@ -600,14 +639,6 @@ export default function AnnotatorPage() {
         mode: 'move', handle: null, startX: x, startY: y, orig: cloneBox(hit),
         groupOrig: isGroupDrag ? boxesRef.current.filter((b) => selectedIds.has(b.id)).map(cloneBox) : undefined,
       };
-      attachWindowDragListeners();
-      return;
-    }
-
-    if (multiKey) {
-      dragRef.current = { mode: 'select', handle: null, startX: x, startY: y };
-      selectRectRef.current = { x0: x, y0: y, x1: x, y1: y };
-      setSelectRect(selectRectRef.current);
       attachWindowDragListeners();
       return;
     }
@@ -672,14 +703,20 @@ export default function AnnotatorPage() {
       const hit = hitTestBox(pos.x, pos.y);
       setHoveredId(hit ? hit.id : null);
 
-      const sel = selectedId ? boxes.find((b) => b.id === selectedId) : null;
-      if (sel) {
-        const handle = hitTestHandle(sel, pos.x, pos.y);
-        if (handle !== null) {
-          cursor = typeof handle === 'number' ? 'pointer' : (HANDLE_CURSOR[handle] || 'pointer');
-        } else if (hit) {
-          cursor = 'move';
+      let handleFound: Handle = null;
+      if (selectedIds.size > 0 || selectedId) {
+        const selectedBoxes = boxes.filter((b) => selectedIds.has(b.id) || b.id === selectedId);
+        for (const sel of selectedBoxes) {
+          const h = hitTestHandle(sel, pos.x, pos.y);
+          if (h !== null) {
+            handleFound = h;
+            break;
+          }
         }
+      }
+
+      if (handleFound !== null) {
+        cursor = typeof handleFound === 'number' ? 'pointer' : (HANDLE_CURSOR[handleFound] || 'pointer');
       } else if (hit) {
         cursor = 'move';
       }
@@ -723,17 +760,17 @@ export default function AnnotatorPage() {
           const o = groupOrig.find((g) => g.id === b.id);
           if (!o) return b;
           if (o.type === 'quad' && o.points) {
-            const newPoints = o.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) as [Point, Point, Point, Point];
+            const newPoints = o.points.map((p) => ({ x: clamp(p.x + dx, 0, w), y: clamp(p.y + dy, 0, h) })) as [Point, Point, Point, Point];
             return { ...b, points: newPoints, ...boundingRect(newPoints) };
           }
-          return { ...b, x: o.x + dx, y: o.y + dy };
+          return { ...b, x: clamp(o.x + dx, 0, w - o.w), y: clamp(o.y + dy, 0, h - o.h) };
         }));
       } else if (orig.type === 'quad' && orig.points) {
         const newPoints = orig.points.map((p) => ({ x: clamp(p.x + dx, 0, w), y: clamp(p.y + dy, 0, h) })) as [Point, Point, Point, Point];
         setBoxes((prev) => prev.map((b) => (b.id === targetId ? { ...b, points: newPoints, ...boundingRect(newPoints) } : b)));
       } else {
         setBoxes((prev) => prev.map((b) => (b.id === targetId
-          ? { ...b, x: clamp(orig.x + dx, 0, w - b.w), y: clamp(orig.y + dy, 0, h - b.h) }
+          ? { ...b, x: clamp(orig.x + dx, 0, w - orig.w), y: clamp(orig.y + dy, 0, h - orig.h) }
           : b)));
       }
     } else if (drag.mode === 'select') {
@@ -749,7 +786,7 @@ export default function AnnotatorPage() {
 
       if (typeof drag.handle === 'number' && orig.points) {
         const newPoints = orig.points.map((p) => ({ ...p })) as [Point, Point, Point, Point];
-        newPoints[drag.handle] = { x, y };
+        newPoints[drag.handle] = { x: clamp(x, 0, imageW), y: clamp(y, 0, imageH) };
         newPrimaryPoints = newPoints;
         const rect = boundingRect(newPoints);
         pnx = rect.x;
@@ -757,38 +794,32 @@ export default function AnnotatorPage() {
         pnw = rect.w;
         pnh = rect.h;
       } else {
-        if (drag.handle === 'se') { pnw = x - orig.x; pnh = y - orig.y; }
-        else if (drag.handle === 'ne') { pnw = x - orig.x; pnh = orig.y + orig.h - y; pny = y; }
-        else if (drag.handle === 'sw') { pnw = orig.x + orig.w - x; pnh = y - orig.y; pnx = x; }
-        else if (drag.handle === 'nw') { pnw = orig.x + orig.w - x; pnh = orig.y + orig.h - y; pnx = x; pny = y; }
-        else if (drag.handle === 'n') { pnh = orig.y + orig.h - y; pny = y; }
-        else if (drag.handle === 's') { pnh = y - orig.y; }
-        else if (drag.handle === 'w') { pnw = orig.x + orig.w - x; pnx = x; }
-        else if (drag.handle === 'e') { pnw = x - orig.x; }
-        if (pnw < 0) { pnx += pnw; pnw = -pnw; }
-        if (pnh < 0) { pny += pnh; pny = -pnh; }
+        const clampedX = clamp(x, 0, imageW);
+        const clampedY = clamp(y, 0, imageH);
+        
+        let x1 = orig.x;
+        let y1 = orig.y;
+        let x2 = orig.x + orig.w;
+        let y2 = orig.y + orig.h;
+
+        if (drag.handle === 'nw') { x1 = clampedX; y1 = clampedY; }
+        else if (drag.handle === 'ne') { x2 = clampedX; y1 = clampedY; }
+        else if (drag.handle === 'se') { x2 = clampedX; y2 = clampedY; }
+        else if (drag.handle === 'sw') { x1 = clampedX; y2 = clampedY; }
+        else if (drag.handle === 'n') { y1 = clampedY; }
+        else if (drag.handle === 's') { y2 = clampedY; }
+        else if (drag.handle === 'w') { x1 = clampedX; }
+        else if (drag.handle === 'e') { x2 = clampedX; }
+
+        pnx = Math.min(x1, x2);
+        pny = Math.min(y1, y2);
+        pnw = Math.max(Math.abs(x2 - x1), 2);
+        pnh = Math.max(Math.abs(y2 - y1), 2);
       }
 
-      // 2. Compute scale factors and anchor point
+      // 2. Compute scale factors
       const scaleX = orig.w > 0 ? pnw / orig.w : 1;
       const scaleY = orig.h > 0 ? pnh / orig.h : 1;
-
-      let ax = orig.x;
-      let ay = orig.y;
-      if (typeof drag.handle === 'number' && orig.points) {
-        const oppIdx = (drag.handle + 2) % 4;
-        ax = orig.points[oppIdx].x;
-        ay = orig.points[oppIdx].y;
-      } else {
-        if (drag.handle === 'se') { ax = orig.x; ay = orig.y; }
-        else if (drag.handle === 'ne') { ax = orig.x; ay = orig.y + orig.h; }
-        else if (drag.handle === 'sw') { ax = orig.x + orig.w; ay = orig.y; }
-        else if (drag.handle === 'nw') { ax = orig.x + orig.w; ay = orig.y + orig.h; }
-        else if (drag.handle === 'n') { ax = orig.x; ay = orig.y + orig.h; }
-        else if (drag.handle === 's') { ax = orig.x; ay = orig.y; }
-        else if (drag.handle === 'w') { ax = orig.x + orig.w; ay = orig.y; }
-        else if (drag.handle === 'e') { ax = orig.x; ay = orig.y; }
-      }
 
       // 3. Apply resize/scale to all boxes in selection group
       if (drag.groupOrig && drag.groupOrig.length > 1) {
@@ -797,26 +828,51 @@ export default function AnnotatorPage() {
           const o = groupOrig.find((g) => g.id === b.id);
           if (!o) return b;
 
-          if (o.type === 'quad' && o.points) {
-            const newPoints = o.points.map((pt) => {
-              const rx = ax + (pt.x - ax) * scaleX;
-              const ry = ay + (pt.y - ay) * scaleY;
-              return {
-                x: clamp(rx, 0, imageW),
-                y: clamp(ry, 0, imageH)
-              };
-            }) as [Point, Point, Point, Point];
+          // For the primary box, use exact calculated primary dimensions
+          if (b.id === targetId) {
+            if (typeof drag.handle === 'number' && newPrimaryPoints) {
+              return { ...b, points: newPrimaryPoints, ...boundingRect(newPrimaryPoints) };
+            }
+            return { ...b, x: pnx, y: pny, w: pnw, h: pnh };
+          }
+
+          // For other selected boxes, scale each box around its OWN corresponding anchor
+          if (o.type === 'quad' && o.points && typeof drag.handle === 'number') {
+            const oppIdx = (drag.handle + 2) % 4;
+            const oAnchor = o.points[oppIdx];
+            const newPoints = o.points.map((pt) => ({
+              x: clamp(oAnchor.x + (pt.x - oAnchor.x) * scaleX, 0, imageW),
+              y: clamp(oAnchor.y + (pt.y - oAnchor.y) * scaleY, 0, imageH),
+            })) as [Point, Point, Point, Point];
             return { ...b, points: newPoints, ...boundingRect(newPoints) };
           } else {
-            const nx1 = ax + (o.x - ax) * scaleX;
-            const nx2 = ax + (o.x + o.w - ax) * scaleX;
-            const ny1 = ay + (o.y - ay) * scaleY;
-            const ny2 = ay + (o.y + o.h - ay) * scaleY;
+            let rx = o.x;
+            let ry = o.y;
+            let rw = o.w;
+            let rh = o.h;
 
-            const rx = clamp(Math.min(nx1, nx2), 0, imageW);
-            const ry = clamp(Math.min(ny1, ny2), 0, imageH);
-            const rw = clamp(Math.max(nx1, nx2), 0, imageW) - rx;
-            const rh = clamp(Math.max(ny1, ny2), 0, imageH) - ry;
+            if (drag.handle === 'se') {
+              rx = o.x; ry = o.y; rw = o.w * scaleX; rh = o.h * scaleY;
+            } else if (drag.handle === 'nw') {
+              rx = o.x + o.w - o.w * scaleX; ry = o.y + o.h - o.h * scaleY; rw = o.w * scaleX; rh = o.h * scaleY;
+            } else if (drag.handle === 'ne') {
+              rx = o.x; ry = o.y + o.h - o.h * scaleY; rw = o.w * scaleX; rh = o.h * scaleY;
+            } else if (drag.handle === 'sw') {
+              rx = o.x + o.w - o.w * scaleX; ry = o.y; rw = o.w * scaleX; rh = o.h * scaleY;
+            } else if (drag.handle === 'n') {
+              rx = o.x; ry = o.y + o.h - o.h * scaleY; rw = o.w; rh = o.h * scaleY;
+            } else if (drag.handle === 's') {
+              rx = o.x; ry = o.y; rw = o.w; rh = o.h * scaleY;
+            } else if (drag.handle === 'w') {
+              rx = o.x + o.w - o.w * scaleX; ry = o.y; rw = o.w * scaleX; rh = o.h;
+            } else if (drag.handle === 'e') {
+              rx = o.x; ry = o.y; rw = o.w * scaleX; rh = o.h;
+            }
+
+            rx = clamp(rx, 0, imageW - 2);
+            ry = clamp(ry, 0, imageH - 2);
+            rw = clamp(Math.max(rw, 2), 2, imageW - rx);
+            rh = clamp(Math.max(rh, 2), 2, imageH - ry);
 
             return { ...b, x: rx, y: ry, w: rw, h: rh };
           }
@@ -902,6 +958,17 @@ export default function AnnotatorPage() {
     updateBoxes((prev) => prev.filter((b) => b.id !== selectedId));
     selectOnly(null);
   }, [selectedId, selectedIds, selectOnly]);
+
+  const clearAllBoxes = useCallback(() => {
+    const currentBoxCount = boxesRef.current.filter((b) => b.id !== DRAWING_ID).length;
+    if (currentBoxCount === 0) return;
+    if (!window.confirm(`Bạn có chắc chắn muốn xoá toàn bộ ${currentBoxCount} nhãn trong hình này? (Có thể hoàn tác bằng Ctrl+Z)`)) return;
+    pushHistorySnapshot();
+    setPrefillCount(0);
+    setBoxes([]);
+    scheduleSave([]);
+    selectOnly(null);
+  }, [boxesRef, pushHistorySnapshot, setPrefillCount, setBoxes, scheduleSave, selectOnly]);
 
   const assignClassToSelected = useCallback((classId: string) => {
     setActiveClassId(classId);
@@ -1049,9 +1116,12 @@ export default function AnnotatorPage() {
     onCancelDrawing: cancelDrawing,
     onSelectOnly: selectOnly,
     onDeleteSelected: deleteSelected,
+    onClearAllBoxes: clearAllBoxes,
     onCopySelectedBox: copySelectedBox,
     onPasteBox: pasteBox,
     onCopyLabelsFromPrev: copyLabelsFromPrev,
+    onCopyImage: copyImageToClipboard,
+    onDeleteImage: handleDeleteImage,
     onAssignClassToSelected: assignClassToSelected,
     onGoTo: goTo,
     onHandleMarkDone: handleMarkDone,
@@ -1099,6 +1169,7 @@ export default function AnnotatorPage() {
         onRejectReview={handleReject}
         onOpenPromptModal={() => setShowPromptModal(true)}
         onOpenAutoLabel={() => setAutoLabelOpen(true)}
+        onCopyImage={copyImageToClipboard}
         onDeleteImage={handleDeleteImage}
       />
 
@@ -1162,6 +1233,7 @@ export default function AnnotatorPage() {
             hoveredId={hoveredId}
             onSelectOnly={selectOnly}
             onUpdateBoxes={updateBoxes}
+            onClearAllBoxes={clearAllBoxes}
             onHoverBox={setHoveredId}
           />
         )}

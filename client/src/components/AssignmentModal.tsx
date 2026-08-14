@@ -91,11 +91,11 @@ export default function AssignmentModal({
   };
 
   const resetAll = async () => {
-    if (!confirm('Gỡ gán TOÀN BỘ ảnh trong project để chia lại từ đầu? % đã lưu vẫn được giữ.')) return;
+    if (!confirm('Gỡ phân công các ảnh CHƯA ĐÁNH DẤU XONG để chia lại? Các ảnh đã đánh dấu là xong sẽ được giữ nguyên.')) return;
     setBusy(true); setError(null); setMessage(null);
     try {
       const res = await api.resetAssignments(projectId);
-      setMessage(`Đã gỡ gán ${res.unassigned} ảnh — bấm "Chia ảnh" để phân công lại.`);
+      setMessage(`Đã gỡ phân công ${res.unassigned} ảnh chưa xong — bấm "Chia ảnh" để phân công lại.`);
       load();
     } catch (e) {
       setError((e as Error).message);
@@ -128,98 +128,106 @@ export default function AssignmentModal({
 
         {summary && (
           <>
-            <p style={{ fontSize: 13, color: '#666', marginBottom: 12 }}>
-              Tổng ảnh: <b>{summary.images.total}</b> — đã gán: <b>{summary.images.assigned}</b> — chưa gán: <b>{summary.images.unassigned}</b>
-              {!isAdmin && ' (chỉ admin mới chỉnh được % và chia ảnh — bạn chỉ xem tiến độ)'}
-            </p>
+            {(() => {
+              const doneCount = summary.images.done ?? 0;
+              const undoneCount = summary.images.undone ?? (summary.images.total - doneCount);
+              return (
+                <>
+                  <p style={{ fontSize: 13, color: '#666', marginBottom: 12 }}>
+                    Tổng ảnh: <b>{summary.images.total}</b> — đã xong: <b style={{ color: '#2E9E6C' }}>{doneCount}</b> — chưa xong: <b style={{ color: '#F05922' }}>{undoneCount}</b> — chưa gán: <b>{summary.images.unassigned}</b>
+                    {!isAdmin && ' (chỉ admin mới chỉnh được % và chia ảnh — bạn chỉ xem tiến độ)'}
+                  </p>
 
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, marginBottom: 12 }}>
-              <thead>
-                <tr style={{ textAlign: 'left', borderBottom: '2px solid #eee' }}>
-                  <th style={{ padding: '4px 6px' }}>User</th>
-                  <th style={{ padding: '4px 6px', width: 90 }}>% mục tiêu</th>
-                  <th style={{ padding: '4px 6px' }}>Tiến độ</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[...allUserIds].map((userId) => {
-                  const row = rowById.get(userId);
-                  const cand = candidateById.get(userId);
-                  const name = row?.display_name ?? cand?.display_name ?? `User #${userId}`;
-                  const color = row?.color ?? cand?.color ?? '#4A3F8C';
-                  const assigned = row?.assigned_count ?? 0;
-                  const done = row?.done_count ?? 0;
-                  const donePct = assigned > 0 ? Math.round((done / assigned) * 100) : 0;
-                  return (
-                    <tr key={userId} style={{ borderBottom: '1px solid #f2f2f2' }}>
-                      <td style={{ padding: '6px' }}>
-                        <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: color, marginRight: 6 }} />
-                        {name}
-                      </td>
-                      <td style={{ padding: '6px' }}>
-                        {isAdmin ? (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <input
-                              type="number" min={0} max={100} step={1}
-                              value={drafts[userId] ?? '0'}
-                              onChange={(e) => setDrafts((prev) => ({ ...prev, [userId]: e.target.value }))}
-                              style={{ width: 60 }}
-                            />
-                            <button onClick={() => removeAssignment(userId)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: 4 }} title="Xoá phân công">
-                              ✕
-                            </button>
-                          </div>
-                        ) : (
-                          <span>{row?.percent ?? 0}%</span>
-                        )}
-                      </td>
-                      <td style={{ padding: '6px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <div style={{ flex: 1, height: 8, background: '#eee', borderRadius: 4, overflow: 'hidden' }}>
-                            <div style={{ width: `${donePct}%`, height: '100%', background: 'var(--orange, #F05922)' }} />
-                          </div>
-                          <span style={{ whiteSpace: 'nowrap', color: '#666' }}>{done}/{assigned} ({donePct}%)</span>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-                {allUserIds.size === 0 && (
-                  <tr><td colSpan={3} style={{ padding: 8, color: '#888' }}>Chưa có ai được phân công.</td></tr>
-                )}
-              </tbody>
-            </table>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, marginBottom: 12 }}>
+                    <thead>
+                      <tr style={{ textAlign: 'left', borderBottom: '2px solid #eee' }}>
+                        <th style={{ padding: '4px 6px' }}>User</th>
+                        <th style={{ padding: '4px 6px', width: 90 }}>% mục tiêu</th>
+                        <th style={{ padding: '4px 6px' }}>Tiến độ</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...allUserIds].map((userId) => {
+                        const row = rowById.get(userId);
+                        const cand = candidateById.get(userId);
+                        const name = row?.display_name ?? cand?.display_name ?? `User #${userId}`;
+                        const color = row?.color ?? cand?.color ?? '#4A3F8C';
+                        const assigned = row?.assigned_count ?? 0;
+                        const done = row?.done_count ?? 0;
+                        const donePct = assigned > 0 ? Math.round((done / assigned) * 100) : 0;
+                        return (
+                          <tr key={userId} style={{ borderBottom: '1px solid #f2f2f2' }}>
+                            <td style={{ padding: '6px' }}>
+                              <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: color, marginRight: 6 }} />
+                              {name}
+                            </td>
+                            <td style={{ padding: '6px' }}>
+                              {isAdmin ? (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <input
+                                    type="number" min={0} max={100} step={1}
+                                    value={drafts[userId] ?? '0'}
+                                    onChange={(e) => setDrafts((prev) => ({ ...prev, [userId]: e.target.value }))}
+                                    style={{ width: 60 }}
+                                  />
+                                  <button onClick={() => removeAssignment(userId)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: 4 }} title="Xoá phân công">
+                                    ✕
+                                  </button>
+                                </div>
+                              ) : (
+                                <span>{row?.percent ?? 0}%</span>
+                              )}
+                            </td>
+                            <td style={{ padding: '6px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <div style={{ flex: 1, height: 8, background: '#eee', borderRadius: 4, overflow: 'hidden' }}>
+                                  <div style={{ width: `${donePct}%`, height: '100%', background: 'var(--orange, #F05922)' }} />
+                                </div>
+                                <span style={{ whiteSpace: 'nowrap', color: '#666' }}>{done}/{assigned} ({donePct}%)</span>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {allUserIds.size === 0 && (
+                        <tr><td colSpan={3} style={{ padding: 8, color: '#888' }}>Chưa có ai được phân công.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
 
-            {isAdmin && (
-              <>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
-                  <select value={addUserId} onChange={(e) => setAddUserId(e.target.value)} style={{ flex: 1 }}>
-                    <option value="">+ Thêm user vào phân công...</option>
-                    {candidates.filter((c) => !allUserIds.has(c.user_id)).map((c) => (
-                      <option key={c.user_id} value={c.user_id}>{c.display_name} ({c.role})</option>
-                    ))}
-                  </select>
-                  <button className="btn btn-outline" onClick={addCandidate} disabled={!addUserId}>Thêm</button>
-                </div>
+                  {isAdmin && (
+                    <>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+                        <select value={addUserId} onChange={(e) => setAddUserId(e.target.value)} style={{ flex: 1 }}>
+                          <option value="">+ Thêm user vào phân công...</option>
+                          {candidates.filter((c) => !allUserIds.has(c.user_id)).map((c) => (
+                            <option key={c.user_id} value={c.user_id}>{c.display_name} ({c.role})</option>
+                          ))}
+                        </select>
+                        <button className="btn btn-outline" onClick={addCandidate} disabled={!addUserId}>Thêm</button>
+                      </div>
 
-                <p style={{ fontSize: 12, color: totalDraftPercent > 100 ? '#C0392B' : '#666', marginBottom: 12 }}>
-                  Tổng %: <b>{totalDraftPercent}</b>{totalDraftPercent !== 100 && ' (không bắt buộc đúng 100% — phần % còn lại sẽ để ảnh chưa gán ai)'}
-                  {totalDraftPercent > 100 && ' — vượt 100%, hãy giảm lại trước khi lưu'}
-                </p>
+                      <p style={{ fontSize: 12, color: totalDraftPercent > 100 ? '#C0392B' : '#666', marginBottom: 12 }}>
+                        Tổng %: <b>{totalDraftPercent}</b>{totalDraftPercent !== 100 && ' (không bắt buộc đúng 100% — phần % còn lại sẽ để ảnh chưa gán ai)'}
+                        {totalDraftPercent > 100 && ' — vượt 100%, hãy giảm lại trước khi lưu'}
+                      </p>
 
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button className="btn btn-primary" onClick={savePercents} disabled={busy || totalDraftPercent > 100}>
-                    Lưu %
-                  </button>
-                  <button className="btn btn-secondary" onClick={distribute} disabled={busy || summary.images.unassigned === 0}>
-                    Chia ảnh (còn {summary.images.unassigned} chưa gán)
-                  </button>
-                  <button className="btn btn-outline" onClick={resetAll} disabled={busy || summary.images.assigned === 0}>
-                    Gán lại từ đầu
-                  </button>
-                </div>
-              </>
-            )}
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        <button className="btn btn-primary" onClick={savePercents} disabled={busy || totalDraftPercent > 100}>
+                          Lưu %
+                        </button>
+                        <button className="btn btn-secondary" onClick={distribute} disabled={busy || undoneCount === 0} title="Phân chia lại toàn bộ ảnh chưa đánh dấu xong theo % mục tiêu">
+                          Chia ảnh ({undoneCount} chưa xong)
+                        </button>
+                        <button className="btn btn-outline" onClick={resetAll} disabled={busy || summary.images.assigned === 0} title="Gỡ phân công các ảnh chưa hoàn thành để chia lại từ đầu">
+                          Gán lại từ đầu
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </>
+              );
+            })()}
           </>
         )}
 

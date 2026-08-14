@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
-import type { SplitPreview } from '../api';
+import type { ProjectStats, SplitPreview } from '../api';
 
 type Format = 'yolo' | 'coco' | 'voc';
 type SplitMode = 'manual' | 'auto';
@@ -21,20 +21,26 @@ export default function ExportModal({ projectId, labelType, onClose }: ExportMod
   const [format, setFormat] = useState<Format>('yolo');
   const [splitMode, setSplitMode] = useState<SplitMode>('manual');
   const [trainRatio, setTrainRatio] = useState(0.8);
+  const [completedOnly, setCompletedOnly] = useState(false);
+  const [stats, setStats] = useState<ProjectStats | null>(null);
   const [preview, setPreview] = useState<SplitPreview | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    api.getStats(projectId).then(setStats).catch(() => {});
+  }, [projectId]);
 
   useEffect(() => {
     if (splitMode !== 'auto') return;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      api.getSplitPreview(projectId, trainRatio).then(setPreview);
+      api.getSplitPreview(projectId, trainRatio, completedOnly).then(setPreview);
     }, 250);
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
-  }, [projectId, splitMode, trainRatio]);
+  }, [projectId, splitMode, trainRatio, completedOnly]);
 
   const runExport = () => {
-    const url = api.exportUrl(projectId, format, { mode: splitMode, trainRatio });
+    const url = api.exportUrl(projectId, format, { mode: splitMode, trainRatio, completedOnly });
     const a = document.createElement('a');
     a.href = url;
     document.body.appendChild(a);
@@ -133,9 +139,77 @@ export default function ExportModal({ projectId, labelType, onClose }: ExportMod
           </div>
         )}
 
+        <div className="field">
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              cursor: 'pointer',
+              userSelect: 'none',
+              padding: '6px 0',
+            }}
+          >
+            <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <input
+                type="checkbox"
+                checked={completedOnly}
+                onChange={(e) => setCompletedOnly(e.target.checked)}
+                style={{
+                  width: '16px',
+                  height: '16px',
+                  accentColor: 'var(--accent-color, #F05922)',
+                  cursor: 'pointer',
+                }}
+              />
+              <span style={{ fontSize: '13.5px', fontWeight: 500, color: 'var(--text-primary)' }}>
+                Chỉ lấy những ảnh đã đánh dấu xong
+              </span>
+            </span>
+            {stats && (
+              <span
+                style={{
+                  fontSize: '12px',
+                  color: completedOnly ? '#fff' : 'var(--text-secondary)',
+                  background: completedOnly ? 'var(--accent-color, #F05922)' : 'var(--bg-secondary)',
+                  padding: '2px 8px',
+                  borderRadius: '12px',
+                  border: '1px solid var(--border-color)',
+                  fontWeight: 600,
+                  transition: 'all 0.2s ease',
+                }}
+              >
+                {completedOnly
+                  ? `${stats.completedImages ?? 0} / ${stats.totalImages} ảnh đã xong`
+                  : `${stats.labeledImages} / ${stats.totalImages} ảnh đã gán nhãn`}
+              </span>
+            )}
+          </label>
+          {completedOnly && stats && (stats.completedImages ?? 0) === 0 && (
+            <p style={{ fontSize: '12px', color: 'var(--danger, #d32f2f)', margin: '4px 0 0 24px' }}>
+              ⚠️ Dự án hiện chưa có ảnh nào được đánh dấu xong.
+            </p>
+          )}
+          {!completedOnly && stats && stats.labeledImages === 0 && (
+            <p style={{ fontSize: '12px', color: 'var(--danger, #d32f2f)', margin: '4px 0 0 24px' }}>
+              ⚠️ Dự án hiện chưa có ảnh nào được gán nhãn.
+            </p>
+          )}
+        </div>
+
         <div className="modal-actions">
           <button className="btn btn-outline" onClick={onClose}>Huỷ</button>
-          <button className="btn btn-primary" onClick={runExport}>Xuất dataset</button>
+          <button
+            className="btn btn-primary"
+            onClick={runExport}
+            disabled={
+              completedOnly
+                ? stats ? (stats.completedImages ?? 0) === 0 : false
+                : stats ? stats.labeledImages === 0 : false
+            }
+          >
+            Xuất dataset {stats ? `(${completedOnly ? (stats.completedImages ?? 0) : stats.labeledImages} ảnh)` : ''}
+          </button>
         </div>
       </div>
     </div>

@@ -58,10 +58,12 @@ export const ClassPickerPanel: React.FC<ClassPickerPanelProps> = ({
       <p style={{ fontSize: 12, color: '#888', lineHeight: 1.5 }}>
         <b>Box:</b> kéo chuột để vẽ khung chữ nhật.<br />
         <b>Quad:</b> bấm lần lượt 4 điểm quanh vật xiên/nghiêng.<br />
-        Delete = xoá khung đã chọn.<br />
+        <b>Chọn nhiều:</b> Kéo chuột phải hoặc giữ Shift/Ctrl + kéo.<br />
+        <b>Xoá khung:</b> Delete | <b>Xoá tất cả:</b> Shift+Delete<br />
         <b>Zoom:</b> lăn chuột (tại vị trí con trỏ) hoặc nút +/−. <b>Pan:</b> Space + kéo, hoặc giữ chuột giữa + kéo.<br />
         <b>Hoàn tác:</b> Ctrl+Z | <b>Làm lại:</b> Ctrl+Y<br />
-        <b>Copy/Dán khung đang chọn:</b> Ctrl+C / Ctrl+V<br />
+        <b>Copy/Dán khung:</b> Ctrl+C / Ctrl+V<br />
+        <b>Copy ảnh:</b> Ctrl+Shift+C | <b>Xoá ảnh:</b> Alt+Delete<br />
         <b>Copy nhãn ảnh trước:</b> Alt+C<br />
         <b>Chọn class nhanh:</b> <b>Ctrl+K</b> (fuzzy search)<br />
         <b>Phím 1-9:</b> 9 class MRU (dùng gần nhất = 1)<br />

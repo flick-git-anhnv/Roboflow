@@ -46,6 +46,7 @@ interface AnnotatorToolbarProps {
   onRejectReview: () => void;
   onOpenPromptModal?: () => void;
   onOpenAutoLabel?: () => void;
+  onCopyImage?: () => void;
   onDeleteImage?: () => void;
 }
 
@@ -85,6 +86,7 @@ export const AnnotatorToolbar: React.FC<AnnotatorToolbarProps> = ({
   onRejectReview,
   onOpenPromptModal,
   onOpenAutoLabel,
+  onCopyImage,
   onDeleteImage,
 }) => {
   const isCopyPrevDisabled = !prevImageItem || prevImageItem.status === 'unlabeled' || copyingLabels;
@@ -118,6 +120,10 @@ export const AnnotatorToolbar: React.FC<AnnotatorToolbarProps> = ({
   };
 
   const copyImageToClipboard = async () => {
+    if (onCopyImage) {
+      onCopyImage();
+      return;
+    }
     const imageUrl = `/uploads/${projectId}/${currentImage.filename}`;
     try {
       const response = await fetch(imageUrl);
@@ -158,8 +164,8 @@ export const AnnotatorToolbar: React.FC<AnnotatorToolbarProps> = ({
       <Link to={`/projects/${projectId}`} className="btn btn-outline">← Quay lại project</Link>
       <button className="btn btn-outline" onClick={() => onGoTo(-1)} disabled={currentIndex <= 0}>‹ Ảnh trước</button>
       <button className="btn btn-outline" onClick={() => onGoTo(1)} disabled={currentIndex < 0 || currentIndex >= totalImages - 1}>Ảnh sau ›</button>
-      <button className="btn btn-outline" onClick={copyImageToClipboard} title="Copy ảnh hiện tại vào clipboard" style={{ fontSize: 12, padding: '2px 8px' }}>📸 Copy ảnh</button>
-      <button className="btn btn-outline" onClick={onDeleteImage} title="Xoá ảnh hiện tại" style={{ fontSize: 12, padding: '2px 8px', color: '#dc2626', borderColor: '#dc2626' }}>🗑️ Xoá ảnh</button>
+      <button className="btn btn-outline" onClick={copyImageToClipboard} title="Copy ảnh hiện tại vào clipboard (Ctrl+Shift+C)" style={{ fontSize: 12, padding: '2px 8px' }}>📸 Copy ảnh (Ctrl+Shift+C)</button>
+      <button className="btn btn-outline" onClick={onDeleteImage} title="Xoá ảnh hiện tại (Alt+Delete)" style={{ fontSize: 12, padding: '2px 8px', color: '#dc2626', borderColor: '#dc2626' }}>🗑️ Xoá ảnh (Alt+Delete)</button>
 
       <div className="tool-toggle">
         <button

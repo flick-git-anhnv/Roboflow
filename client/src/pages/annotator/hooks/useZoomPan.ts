@@ -48,8 +48,8 @@ export function useZoomPan(
 
       const ratio = newZoom / currentZoom;
       pendingScrollRef.current = {
-        left: mouseCanvasX * (ratio - 1) - canvasViewportLeft,
-        top: mouseCanvasY * (ratio - 1) - canvasViewportTop,
+        left: Math.max(0, container.scrollLeft + mouseCanvasX * (ratio - 1)),
+        top: Math.max(0, container.scrollTop + mouseCanvasY * (ratio - 1)),
       };
       setZoom(newZoom);
     };

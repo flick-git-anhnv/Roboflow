@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 interface PaginationControlsProps {
   page: number;
@@ -7,6 +7,8 @@ interface PaginationControlsProps {
 }
 
 export const PaginationControls: React.FC<PaginationControlsProps> = ({ page, pageCount, onChange }) => {
+  const [jumpPage, setJumpPage] = useState('');
+
   if (pageCount <= 1) return null;
 
   const pages = new Set<number>([1, pageCount, page, page - 1, page + 1]);
@@ -18,6 +20,16 @@ export const PaginationControls: React.FC<PaginationControlsProps> = ({ page, pa
     rendered.push(p);
   });
 
+  const handleJump = (e: React.FormEvent) => {
+    e.preventDefault();
+    const target = parseInt(jumpPage, 10);
+    if (!isNaN(target)) {
+      const validPage = Math.max(1, Math.min(pageCount, target));
+      onChange(validPage);
+      setJumpPage('');
+    }
+  };
+
   return (
     <div className="pagination">
       <button className="btn btn-outline" onClick={() => onChange(page - 1)} disabled={page <= 1}>‹ Trước</button>
@@ -27,6 +39,23 @@ export const PaginationControls: React.FC<PaginationControlsProps> = ({ page, pa
         <button key={p} className={`pagination-page ${p === page ? 'active' : ''}`} onClick={() => onChange(p)}>{p}</button>
       ))}
       <button className="btn btn-outline" onClick={() => onChange(page + 1)} disabled={page >= pageCount}>Sau ›</button>
+
+      <form className="pagination-jump" onSubmit={handleJump}>
+        <span className="pagination-jump-label">Đến trang:</span>
+        <input
+          type="number"
+          min={1}
+          max={pageCount}
+          value={jumpPage}
+          onChange={(e) => setJumpPage(e.target.value)}
+          placeholder={String(page)}
+          className="pagination-jump-input"
+          aria-label="Nhập số trang"
+        />
+        <button type="submit" className="btn btn-outline pagination-jump-btn">
+          Đi
+        </button>
+      </form>
     </div>
   );
 };

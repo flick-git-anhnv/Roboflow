@@ -1388,6 +1388,66 @@ async function runTests() {
         ok('Row25: sau reset annotator thấy 0 ảnh (chưa gán lại)', imgs.length === 0, `length=${imgs.length}`);
       }
 
+      // 13. Test giữ nguyên ảnh đã làm/đã hoàn thành khi reset & redistribute
+      // Tạo 1 class trong A25_PID để gán nhãn
+      const a25ClsRes = await post(`/api/projects/${A25_PID}/classes`, { name: 'test_class', color: '#FF0000' }, adminToken);
+      const a25ClsId = a25ClsRes.status === 201 ? (await a25ClsRes.json()).id : null;
+
+      // Chia lại 3 ảnh cho annotator
+      await post(`/api/projects/${A25_PID}/assignments/distribute`, {}, adminToken);
+      const annImgs = await (await get(`/api/projects/${A25_PID}/images`, annotatorToken)).json();
+      ok('Row25: annotator nhận 3 ảnh sau distribute', annImgs.length === 3, `got ${annImgs.length}`);
+
+      if (annImgs.length === 3) {
+        // Đánh dấu xong 1 ảnh (mark-done)
+        const doneImgId = annImgs[0].id;
+        await post(`/api/projects/${A25_PID}/images/${doneImgId}/mark-done`, {}, annotatorToken);
+
+        // Gán nhãn cho ảnh thứ 2 nhưng CHƯA đánh dấu xong
+        const labeledImgId = annImgs[1].id;
+        const annSaveRes = await put(`/api/images/${labeledImgId}/annotations`, {
+          annotations: [{ class_id: a25ClsId, x: 10, y: 10, w: 50, h: 50 }],
+        }, annotatorToken);
+        ok('Row25 setup: gán nhãn ảnh 2 thành công', annSaveRes.status === 200, `got ${annSaveRes.status}`);
+
+        // Kiểm tra tiến độ: chỉ tính ảnh đã đánh dấu xong (done_count = 1)
+        const summaryCheck = await (await get(`/api/projects/${A25_PID}/assignments`, adminToken)).json();
+        const annRow = summaryCheck.assignments.find(r => r.user_id === annotatorId);
+        ok('Row25: tiến độ chỉ tính trên ảnh đánh dấu là xong (done_count=1)', annRow?.done_count === 1, `done_count=${annRow?.done_count}`);
+
+        // Reset lại phân công: chỉ giữ lại ảnh đã xong (doneImgId), gỡ 2 ảnh chưa xong (labeledImgId và ảnh 3)
+        const reset2 = await (await post(`/api/projects/${A25_PID}/assignments/reset`, {}, adminToken)).json();
+        ok('Row25: reset gỡ 2 ảnh chưa đánh dấu xong và giữ nguyên 1 ảnh đã xong', reset2.unassigned === 2, `unassigned=${reset2.unassigned}`);
+
+        // Annotator chỉ còn giữ đúng 1 ảnh đã đánh dấu xong
+        const remainingAnnImgs = await (await get(`/api/projects/${A25_PID}/images`, annotatorToken)).json();
+        ok('Row25: annotator vẫn giữ 1 ảnh đã xong', remainingAnnImgs.length === 1 && remainingAnnImgs[0].id === doneImgId);
+
+        // Phân công lại: chia thêm 2 ảnh chưa xong để đủ 3 ảnh (30%)
+        const dist2 = await (await post(`/api/projects/${A25_PID}/assignments/distribute`, {}, adminToken)).json();
+        ok('Row25: distribute top-up thêm đúng 2 ảnh còn thiếu để đủ 3 ảnh (30%)', dist2.distributed === 2, `distributed=${dist2.distributed}`);
+
+        // 14. Test rebalancing: Admin đổi % thành Annotator 50% (5 ảnh), Reviewer 50% (5 ảnh)
+        // và bấm distribute trực tiếp (không cần reset trước)
+        await put(`/api/projects/${A25_PID}/assignments`, {
+          assignments: [
+            { user_id: annotatorId, percent: 50 },
+            { user_id: reviewerData.id, percent: 50 },
+          ]
+        }, adminToken);
+
+        const dist5050 = await (await post(`/api/projects/${A25_PID}/assignments/distribute`, {}, adminToken)).json();
+        ok('Row25: distribute rebalance lại 50/50 trực tiếp thành công', dist5050.ok === true);
+
+        const summary5050 = await (await get(`/api/projects/${A25_PID}/assignments`, adminToken)).json();
+        const ann50 = summary5050.assignments.find(r => r.user_id === annotatorId);
+        const rev50 = summary5050.assignments.find(r => r.user_id === reviewerData.id);
+
+        ok('Row25: Annotator có đúng 5 ảnh (50%)', ann50?.assigned_count === 5, `assigned=${ann50?.assigned_count}`);
+        ok('Row25: Reviewer có đúng 5 ảnh (50%)', rev50?.assigned_count === 5, `assigned=${rev50?.assigned_count}`);
+        ok('Row25: Annotator vẫn giữ nguyên ảnh đã xong', ann50?.done_count === 1, `done_count=${ann50?.done_count}`);
+      }
+
       // Cleanup
       await del(`/api/projects/${A25_PID}`, adminToken);
     }

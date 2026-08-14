@@ -20,9 +20,12 @@ interface UseHotkeysOptions {
   onCancelDrawing: () => void;
   onSelectOnly: (id: string | null) => void;
   onDeleteSelected: () => void;
+  onClearAllBoxes?: () => void;
   onCopySelectedBox: () => void;
   onPasteBox: () => void;
   onCopyLabelsFromPrev: () => void;
+  onCopyImage?: () => void;
+  onDeleteImage?: () => void;
   onAssignClassToSelected: (classId: string) => void;
   onGoTo: (delta: number) => void;
   onHandleMarkDone: () => void;
@@ -48,9 +51,12 @@ export function useHotkeys({
   onCancelDrawing,
   onSelectOnly,
   onDeleteSelected,
+  onClearAllBoxes,
   onCopySelectedBox,
   onPasteBox,
   onCopyLabelsFromPrev,
+  onCopyImage,
+  onDeleteImage,
   onAssignClassToSelected,
   onGoTo,
   onHandleMarkDone,
@@ -75,6 +81,33 @@ export function useHotkeys({
       }
 
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || (e.target as HTMLElement).isContentEditable) return;
+
+      // Copy image shortcut: Ctrl+Shift+C or Alt+Shift+C
+      if (((e.ctrlKey || e.metaKey || e.altKey) && e.shiftKey) && (e.key === 'c' || e.key === 'C')) {
+        if (onCopyImage) {
+          e.preventDefault();
+          onCopyImage();
+          return;
+        }
+      }
+
+      // Delete image shortcut: Alt+Delete or Alt+Backspace
+      if (e.altKey && !e.shiftKey && (e.key === 'Delete' || e.key === 'Backspace')) {
+        if (onDeleteImage) {
+          e.preventDefault();
+          onDeleteImage();
+          return;
+        }
+      }
+
+      // Clear all annotations shortcut: Shift+Delete or Shift+Backspace or Ctrl+Shift+Delete
+      if (e.shiftKey && (e.key === 'Delete' || e.key === 'Backspace')) {
+        if (onClearAllBoxes) {
+          e.preventDefault();
+          onClearAllBoxes();
+          return;
+        }
+      }
 
       // Ctrl+Z / Ctrl+Y
       if (e.ctrlKey || e.metaKey) {
@@ -105,8 +138,8 @@ export function useHotkeys({
         }
       }
 
-      // Alt+C
-      if (e.altKey && (e.key === 'c' || e.key === 'C')) {
+      // Alt+C: Copy labels from prev image
+      if (e.altKey && !e.shiftKey && (e.key === 'c' || e.key === 'C')) {
         e.preventDefault();
         onCopyLabelsFromPrev();
         return;
@@ -200,8 +233,8 @@ export function useHotkeys({
   }, [
     labelType, selectedId, selectedIds, drawingPoints, mruClassIds, classes, image, clipboardBoxRef,
     setShowSwitcher, setSwitcherQuery, setSwitcherIdx, onUndo, onRedo, onUndoLastPoint,
-    onCancelDrawing, onSelectOnly, onDeleteSelected, onCopySelectedBox, onPasteBox,
-    onCopyLabelsFromPrev, onAssignClassToSelected, onGoTo, onHandleMarkDone, onHandleUnmarkDone,
+    onCancelDrawing, onSelectOnly, onDeleteSelected, onClearAllBoxes, onCopySelectedBox, onPasteBox,
+    onCopyLabelsFromPrev, onCopyImage, onDeleteImage, onAssignClassToSelected, onGoTo, onHandleMarkDone, onHandleUnmarkDone,
     onClassifyImage,
   ]);
 }

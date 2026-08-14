@@ -240,6 +240,9 @@ export function useAnnotatorData(
     handleReject,
     handleMarkDone,
     handleUnmarkDone,
+    removeImageFromList: useCallback((deletedId: string) => {
+      setImages((prev) => prev.filter((i) => i.id !== deletedId));
+    }, []),
   };
 }
 
